@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CANDIDATE
+  INTERVIEWER
+  ADMIN
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum Verdict {
+  PENDING
+  ACCEPTED
+  WRONG_ANSWER
+  TIME_LIMIT_EXCEEDED
+  MEMORY_LIMIT_EXCEEDED
+  RUNTIME_ERROR
+  COMPILATION_ERROR
+  INTERNAL_ERROR
+}
+
+enum SessionStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String    @map("password_hash")
+  displayName    String    @map("display_name")
+  avatarUrl      String?   @map("avatar_url")
+  role           Role      @default(CANDIDATE)
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  refreshTokens   RefreshToken[]
+  submissions     Submission[]
+  createdSessions InterviewSession[]  @relation("SessionCreator")
+  participations  SessionParticipant[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  family    String    @default(uuid())
+
+  @@index([userId])
+  @@index([family])
+  @@map("refresh_tokens")
+}
+
+model Problem {
+  id             String      @id @default(uuid())
+  title          String
+  slug           String      @unique
+  description    String
+  difficulty     Difficulty
+  constraints    String?
+  starterCode    Json        @map("starter_code")
+  supportedLangs String[]    @map("supported_langs")
+  isPublished    Boolean     @default(false) @map("is_published")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  testCases       TestCase[]
+  submissions     Submission[]
+  sessionProblems InterviewSessionProblem[]
+
+  @@map("problems")
+}
+
+model TestCase {
+  id        String  @id @default(uuid())
+  problemId String  @map("problem_id")
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  input     String
+  expected  String
+  isHidden  Boolean @default(false) @map("is_hidden")
+  ordinal   Int     @default(0)
+
+  @@index([problemId])
+  @@map("test_cases")
+}
+
+model Submission {
+  id          String            @id @default(uuid())
+  userId      String            @map("user_id")
+  user        User              @relation(fields: [userId], references: [id])
+  problemId   String            @map("problem_id")
+  problem     Problem           @relation(fields: [problemId], references: [id])
+  sessionId   String?           @map("session_id")
+  session     InterviewSession? @relation(fields: [sessionId], references: [id])
+  language    String
+  code        String
+  verdict     Verdict           @default(PENDING)
+  runtimeMs   Int?              @map("runtime_ms")
+  memoryKb    Int?              @map("memory_kb")
+  stdout      String?
+  stderr      String?
+  testResults Json?             @map("test_results")
+  submittedAt DateTime          @default(now()) @map("submitted_at")
+
+  @@index([userId, problemId])
+  @@index([sessionId])
+  @@map("submissions")
+}
+
+model InterviewSession {
+  id          String        @id @default(uuid())
+  title       String
+  creatorId   String        @map("creator_id")
+  creator     User          @relation("SessionCreator", fields: [creatorId], references: [id])
+  status      SessionStatus @default(SCHEDULED)
+  scheduledAt DateTime?     @map("scheduled_at")
+  startedAt   DateTime?     @map("started_at")
+  endedAt     DateTime?     @map("ended_at")
+  yjsSnapshot Bytes?        @map("yjs_snapshot")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  participants SessionParticipant[]
+  problems     InterviewSessionProblem[]
+  submissions  Submission[]
+
+  @@map("interview_sessions")
+}
+
+model SessionParticipant {
+  id        String           @id @default(uuid())
+  sessionId String           @map("session_id")
+  session   InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId    String           @map("user_id")
+  user      User             @relation(fields: [userId], references: [id])
+  role      Role
+  joinedAt  DateTime         @default(now()) @map("joined_at")
+
+  @@unique([sessionId, userId])
+  @@map("session_participants")
+}
+
+model InterviewSessionProblem {
+  id        String           @id @default(uuid())
+  sessionId String           @map("session_id")
+  session   InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  problemId String           @map("problem_id")
+  problem   Problem          @relation(fields: [problemId], references: [id])
+  ordinal   Int              @default(0)
+
+  @@unique([sessionId, problemId])
+  @@map("interview_session_problems")
+}
