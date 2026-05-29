@@ -1,0 +1,43 @@
+.page { padding: 2rem; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.5rem; }
+.header { display: flex; flex-direction: column; gap: 0.25rem; }
+.backBtn { display: inline-flex; align-items: center; gap: 0.4rem; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 0.85rem; padding: 0; margin-bottom: 0.5rem; transition: color 0.2s; }
+.backBtn:hover { color: var(--text-primary); }
+.header h1 { font-size: 1.8rem; font-weight: 700; color: var(--text-primary); margin: 0; }
+.subtitle { color: var(--text-secondary); font-size: 0.9rem; margin: 0; }
+.loading { color: var(--text-secondary); padding: 2rem; text-align: center; }
+.content { display: flex; flex-direction: column; gap: 1.25rem; }
+
+.section { padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+.sectionTitle { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; font-weight: 600; color: var(--text-primary); margin: 0; }
+
+.detailRow { display: flex; gap: 1rem; align-items: flex-start; font-size: 0.9rem; }
+.detailKey { color: var(--text-secondary); min-width: 100px; }
+.detailVal { color: var(--text-primary); }
+
+.shareBox { display: flex; align-items: center; gap: 0.75rem; background: var(--surface-secondary, rgba(255,255,255,0.04)); border: 1px solid var(--border-primary); border-radius: 8px; padding: 0.6rem 0.75rem; }
+.shareUrl { font-size: 0.8rem; color: var(--text-secondary); word-break: break-all; flex: 1; font-family: monospace; }
+.copyBtn { padding: 0.3rem 0.8rem; background: var(--accent-primary); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; white-space: nowrap; transition: opacity 0.2s; }
+.copyBtn:hover { opacity: 0.85; }
+.expiry { display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--text-secondary); margin: 0; }
+
+.linkActions { display: flex; gap: 0.75rem; }
+.primaryBtn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.65rem 1.25rem; background: var(--accent-primary); color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: opacity 0.2s; }
+.primaryBtn:hover { opacity: 0.85; }
+.secondaryBtn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; background: transparent; border: 1px solid var(--border-primary); color: var(--text-primary); border-radius: 7px; cursor: pointer; font-size: 0.85rem; transition: all 0.2s; }
+.secondaryBtn:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+.dangerBtn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; background: transparent; border: 1px solid #ef4444; color: #ef4444; border-radius: 7px; cursor: pointer; font-size: 0.85rem; transition: all 0.2s; }
+.dangerBtn:hover { background: #ef4444; color: #fff; }
+
+.revokedState { display: flex; align-items: center; gap: 0.75rem; color: var(--text-secondary); font-size: 0.9rem; }
+.revokedIcon { color: #ef4444; }
+
+.exportActions { display: flex; gap: 0.75rem; }
+.exportBtn { padding: 0.6rem 1.25rem; background: transparent; border: 1px solid var(--accent-primary); color: var(--accent-primary); border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: all 0.2s; }
+.exportBtn:hover:not(:disabled) { background: var(--accent-primary); color: #fff; }
+.exportBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.exportMsg { font-size: 0.85rem; color: var(--text-secondary); margin: 0; }
+
+.emptyState { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 3rem 1rem; text-align: center; }
+.emptyIcon { color: var(--text-muted, #666); }
+.emptyState h2 { font-size: 1.2rem; font-weight: 600; margin: 0; color: var(--text-primary); }
+.emptyState p { color: var(--text-secondary); margin: 0; }

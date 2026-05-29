@@ -1,0 +1,92 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+
+/* Difficulty variants */
+.easy {
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--difficulty-easy);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.medium {
+  background: rgba(255, 178, 36, 0.12);
+  color: var(--difficulty-medium);
+  border: 1px solid rgba(255, 178, 36, 0.2);
+}
+
+.hard {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--difficulty-hard);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Status variants */
+.scheduled {
+  background: rgba(79, 143, 255, 0.12);
+  color: var(--status-info);
+  border: 1px solid rgba(79, 143, 255, 0.2);
+}
+
+.active {
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--status-success);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.completed {
+  background: rgba(139, 139, 163, 0.12);
+  color: var(--text-secondary);
+  border: 1px solid rgba(139, 139, 163, 0.2);
+}
+
+.cancelled {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--status-error);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Verdict variants */
+.accepted {
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--status-success);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.wrong_answer,
+.time_limit_exceeded,
+.memory_limit_exceeded,
+.runtime_error,
+.compilation_error,
+.internal_error {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--status-error);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.pending {
+  background: rgba(129, 140, 248, 0.12);
+  color: var(--status-pending);
+  border: 1px solid rgba(129, 140, 248, 0.2);
+}
+
+/* Language tag */
+.lang {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  text-transform: none;
+  letter-spacing: 0;
+}

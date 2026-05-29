@@ -1,0 +1,108 @@
+.shell {
+  margin-bottom: var(--space-xl);
+  padding: var(--space-lg) 0 var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+  position: relative;
+  z-index: 1;
+}
+
+.headerRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-md);
+}
+
+.eyebrow {
+  margin: 0 0 var(--space-2xs);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin: var(--space-2xs) 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.contextPill {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.navRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.navLink {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 var(--space-md);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all var(--transition-fast);
+}
+
+.navLink:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.navLinkActive {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary-glow);
+  color: var(--accent-primary);
+}
+
+.breadcrumbLink {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.breadcrumbLink:hover {
+  color: var(--text-primary);
+}
+
+.slash {
+  margin: 0 var(--space-2xs);
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .headerRow {
+    flex-direction: column;
+  }
+
+  .contextPill {
+    align-self: flex-start;
+  }
+}

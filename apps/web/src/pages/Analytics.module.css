@@ -1,0 +1,47 @@
+.page { padding: 2rem; max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.5rem; }
+.header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+.header h1 { font-size: 1.8rem; font-weight: 700; color: var(--text-primary); margin: 0; }
+.subtitle { color: var(--text-secondary); font-size: 0.9rem; margin: 0; }
+.controls { display: flex; align-items: center; gap: 0.75rem; }
+.daysPicker { display: flex; gap: 0.25rem; background: var(--surface-secondary, rgba(255,255,255,0.04)); padding: 0.25rem; border-radius: 8px; }
+.dayBtn { padding: 0.35rem 0.75rem; border: none; background: transparent; color: var(--text-secondary); border-radius: 6px; cursor: pointer; font-size: 0.85rem; transition: all 0.2s; }
+.activeDayBtn { background: var(--accent-primary); color: #fff; }
+.refreshBtn { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid var(--border-primary); border-radius: 8px; cursor: pointer; color: var(--text-secondary); transition: all 0.2s; }
+.refreshBtn:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+.refreshBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.8s linear infinite; }
+
+.grid { display: flex; flex-direction: column; gap: 1.25rem; }
+.metricsRow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+@media (max-width: 768px) { .metricsRow { grid-template-columns: repeat(2, 1fr); } }
+.metricItem { padding: 1.25rem; text-align: center; }
+.metricVal { display: block; font-size: 2rem; font-weight: 700; color: var(--accent-primary); }
+.metricLabel { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem; }
+
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+@media (max-width: 768px) { .charts { grid-template-columns: 1fr; } }
+.cardTitle { font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin: 0 0 1rem 0; padding: 1rem 1rem 0; }
+
+.barChart { padding: 0 1rem 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.barRow { display: grid; grid-template-columns: 90px 1fr 40px; align-items: center; gap: 0.6rem; }
+.barLabel { font-size: 0.82rem; color: var(--text-secondary); }
+.barTrack { height: 10px; background: var(--surface-secondary, rgba(255,255,255,0.06)); border-radius: 5px; overflow: hidden; }
+.barFill { height: 100%; background: linear-gradient(90deg, var(--accent-primary), var(--accent-cyan)); border-radius: 5px; }
+.barCount { font-size: 0.82rem; color: var(--text-primary); font-weight: 600; text-align: right; }
+
+.statusGrid { padding: 0 1rem 1rem; display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
+.statusItem { display: flex; flex-direction: column; align-items: center; padding: 1rem; border-radius: 10px; background: var(--surface-secondary, rgba(255,255,255,0.04)); }
+.statusCount { font-size: 1.6rem; font-weight: 700; }
+.statusLabel { font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.2rem; }
+.active .statusCount { color: #22c55e; }
+.scheduled .statusCount { color: #60a5fa; }
+.completed .statusCount { color: var(--text-secondary); }
+.cancelled .statusCount { color: #f87171; }
+
+.sparkline { padding: 0 1rem 1rem; display: flex; align-items: flex-end; gap: 3px; height: 80px; }
+.sparkBar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; justify-content: flex-end; }
+.sparkFill { width: 100%; min-height: 2px; background: var(--accent-primary); border-radius: 2px 2px 0 0; opacity: 0.8; }
+.sparkDate { font-size: 0.6rem; color: var(--text-muted, #555); white-space: nowrap; }
+
+.noData { display: flex; align-items: center; gap: 0.75rem; color: var(--text-secondary); padding: 2rem; justify-content: center; font-size: 0.95rem; }
