@@ -7,3 +7,4 @@ export class CollaborationModule {
 	gateway = new CollaborationGateway(this.service);
 	presence = new PresenceService();
 }
+

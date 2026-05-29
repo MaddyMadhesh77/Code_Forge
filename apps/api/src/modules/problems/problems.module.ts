@@ -5,3 +5,4 @@ export class ProblemsModule {
 	controller = new ProblemsController(new ProblemsService());
 	service = new ProblemsService();
 }
+

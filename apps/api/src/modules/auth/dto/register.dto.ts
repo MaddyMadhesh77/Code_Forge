@@ -3,3 +3,4 @@ export type RegisterDto = {
   password: string;
   displayName: string;
 };
+

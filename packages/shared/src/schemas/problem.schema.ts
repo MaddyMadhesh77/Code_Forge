@@ -28,6 +28,14 @@ export const problemWithTestCasesSchema = problemSchema.extend({
   testCases: z.array(testCaseSchema),
 });
 
+export const customProblemSchema = problemSchema.extend({
+  ownerId: z.string().uuid().optional(),
+  teamId: z.string().uuid().optional(),
+  visibility: z.enum(["PRIVATE", "TEAM", "PUBLIC"]),
+  testCases: z.array(testCaseSchema),
+});
+
 export type ProblemInput = z.infer<typeof problemSchema>;
 export type TestCaseInput = z.infer<typeof testCaseSchema>;
 export type ProblemWithTestCases = z.infer<typeof problemWithTestCasesSchema>;
+export type CustomProblemInput = z.infer<typeof customProblemSchema>;

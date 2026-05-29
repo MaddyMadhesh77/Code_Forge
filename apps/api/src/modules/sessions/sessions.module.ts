@@ -5,3 +5,4 @@ export class SessionsModule {
   controller = new SessionsController(new SessionsService());
   service = new SessionsService();
 }
+

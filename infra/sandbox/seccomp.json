@@ -1,0 +1,156 @@
+#!/bin/bash
+# Seccomp profile for Code Forge sandbox execution
+# Whitelists only necessary syscalls for code execution (Python, Node, Java, etc.)
+# Usage: docker run --security-opt seccomp=sandbox-seccomp.json codeforge-executor
+
+{
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "defaultErrnoRet": 1,
+  "archMap": [
+    {
+      "architecture": "SCMP_ARCH_X86_64",
+      "subArchitectures": [
+        "SCMP_ARCH_X86",
+        "SCMP_ARCH_X32"
+      ]
+    }
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "arch_prctl",
+        "mmap",
+        "mprotect",
+        "munmap",
+        "brk",
+        "mremap",
+        "madvise",
+        "mlock",
+        "munlock",
+        "mlockall",
+        "munlockall"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": []
+    },
+    {
+      "names": [
+        "open",
+        "openat",
+        "openat2",
+        "read",
+        "write",
+        "close",
+        "lseek",
+        "stat",
+        "fstat",
+        "lstat",
+        "access",
+        "faccessat",
+        "getcwd",
+        "chdir",
+        "fchdir",
+        "readdir",
+        "getdents",
+        "getdents64"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": []
+    },
+    {
+      "names": [
+        "clone",
+        "clone3",
+        "fork",
+        "vfork",
+        "execve",
+        "execveat",
+        "exit",
+        "exit_group",
+        "wait4",
+        "waitpid",
+        "waitid"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": []
+    },
+    {
+      "names": [
+        "signal",
+        "sigaction",
+        "sigprocmask",
+        "sigpending",
+        "sigsuspend",
+        "rt_sigaction",
+        "rt_sigprocmask",
+        "rt_sigpending",
+        "rt_sigsuspend",
+        "rt_sigtimedwait"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": []
+    },
+    {
+      "names": [
+        "kill",
+        "tkill",
+        "tgkill",
+        "raise",
+        "pause"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": []
+    },
+    {
+      "names": [
+        "pipe",
+        "pipe2",
+        "dup",
+        "dup2",
+        "dup3",
+        "fcntl",
+        "ioctl",
+        "poll",
+        "select",
+        "pselect6",
+        "epoll_create",
+        "epoll_create1",
+        "epoll_ctl",
+        "epoll_wait",
+        "epoll_pwait"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": []
+    },
+    {
+      "names": [
+        "getpid",
+        "getppid",
+        "getuid",
+        "getgid",
+        "geteuid",
+        "getegid",
+        "gettid",
+        "getpgrp",
+        "getpgid",
+        "getsid",
+        "gettimeofday",
+        "clock_gettime",
+        "clock_getres",
+        "time",
+        "times",
+        "uname"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": []
+    },
+    {
+      "names": [
+        "futex",
+        "futex_waitv"
+      ],
+      "action": "SCMP_ACT_ALLOW",
+      "args": []
+    }
+  ]
+}

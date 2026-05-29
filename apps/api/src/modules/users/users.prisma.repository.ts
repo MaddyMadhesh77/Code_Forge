@@ -20,3 +20,4 @@ export class PrismaUsersRepository implements UsersRepository {
     return this.prisma.userSetActive(id, isActive);
   }
 }
+

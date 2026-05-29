@@ -24,3 +24,4 @@ export class UsersService {
     return this.repository.setActive(userId, true);
   }
 }
+

@@ -1,1 +1,0 @@
-Feature: Interview system docs - Step 2

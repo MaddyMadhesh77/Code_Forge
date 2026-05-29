@@ -31,3 +31,4 @@ export class PresenceStore {
     return Array.from(presenceBySession.get(sessionId)?.entries() ?? []);
   }
 }
+

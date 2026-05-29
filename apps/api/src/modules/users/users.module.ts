@@ -14,3 +14,4 @@ export class UsersModule {
     this.controller = new UsersController(this.service);
   }
 }
+

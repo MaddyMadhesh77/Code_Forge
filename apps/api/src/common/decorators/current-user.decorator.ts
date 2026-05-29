@@ -1,3 +1,3 @@
 export function CurrentUser() {
-  return null;
+  return (..._args: any[]) => undefined;
 }

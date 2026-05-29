@@ -1,4 +1,6 @@
 export class PrismaService {
+  [key: string]: any;
+
   private connected = false;
   private readonly users = [
     {

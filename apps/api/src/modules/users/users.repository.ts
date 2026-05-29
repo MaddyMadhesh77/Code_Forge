@@ -16,3 +16,4 @@ export interface UsersRepository {
   update(id: string, patch: UpdateUserPatch): UserRecord;
   setActive(id: string, isActive: boolean): UserRecord;
 }
+

@@ -5,3 +5,4 @@ export class AuthModule {
   controller = new AuthController(new AuthService());
   service = new AuthService();
 }
+

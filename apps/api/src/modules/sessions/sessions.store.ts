@@ -89,3 +89,4 @@ export class SessionsStore {
     return session;
   }
 }
+
