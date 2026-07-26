@@ -114,6 +114,8 @@ export default function SessionReplay() {
       setData((current) => current ? { ...current, notes: [...current.notes, saved] } : current);
       setNote('');
       setActivity('Annotation saved');
+    } catch {
+      setActivity('Failed to save annotation — please try again');
     } finally {
       setSavingNote(false);
     }
@@ -144,7 +146,7 @@ export default function SessionReplay() {
         <div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(18,22,34,0.96),rgba(11,15,24,0.88))] p-6 shadow-[0_24px_80px_rgba(0,0,0,0.28)] lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-2">
             <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--text-muted)]">Session replay</p>
-            <h1 className="text-3xl font-semibold text-[color:var(--text-primary)]">{data?.title ?? `Replay ${sessionId}`}</h1>
+            <h1 className="text-3xl font-semibold text-[color:var(--text-primary)]">{data?.title ?? `Replay ${sessionKey}`}</h1>
             <p className="max-w-2xl text-sm text-[color:var(--text-muted)]">
               Playback code changes, audio/video, chat, and annotations at the same timestamp.
             </p>

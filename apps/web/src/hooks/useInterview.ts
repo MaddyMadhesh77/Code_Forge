@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, type Socket } from 'socket.io-client';
+import { getStoredAuthTokens } from '../services/authStorage';
 
 /* ── Types ── */
 export interface Participant {
@@ -102,9 +103,7 @@ export function useInterview({ sessionId, userId, userName, role, enabled = true
     if (!enabled || !sessionId) return;
 
     const socket = io('/interviews', {
-      auth: { token: localStorage.getItem('codeforge_tokens')
-        ? JSON.parse(localStorage.getItem('codeforge_tokens')!).accessToken
-        : undefined },
+      auth: { token: getStoredAuthTokens()?.accessToken },
       query: { sessionId, userId, role },
       transports: ['websocket', 'polling'],
       reconnection: true,

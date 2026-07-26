@@ -1,5 +1,5 @@
-import axios from 'axios';
 import { requestJSON } from './http';
+import { axiosClient } from './api/axios';
 import {
   mockProblems,
   mockSessions,
@@ -56,9 +56,7 @@ import type {
 
 const API_BASE = '';
 
-const processEnv = (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env;
-const API_BASE_URL = processEnv?.NEXT_PUBLIC_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || '/api';
-const SHOULD_USE_FALLBACKS = import.meta.env.DEV || processEnv?.NEXT_PUBLIC_USE_MOCKS === 'true';
+const SHOULD_USE_FALLBACKS = import.meta.env.DEV || import.meta.env.VITE_USE_MOCKS === 'true';
 
 function unwrapApiPayload<T>(payload: T | { data?: T }): T {
   if (payload && typeof payload === 'object' && 'data' in payload && (payload as { data?: T }).data !== undefined) {
@@ -68,30 +66,9 @@ function unwrapApiPayload<T>(payload: T | { data?: T }): T {
   return payload as T;
 }
 
-export const apiClient = axios.create({
-  baseURL: API_BASE_URL.replace(/\/$/, ''),
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  withCredentials: false,
-});
-
-apiClient.interceptors.request.use((config) => {
-  // Placeholder: attach refreshed auth tokens here when the web shell enables auth.
-  return config;
-});
-
-apiClient.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    // Placeholder: retry once after refresh when auth refresh is wired in.
-    return Promise.reject(error);
-  },
-);
-
 async function requestApi<T>(url: string, fallback: T, options?: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; params?: Record<string, string | number | undefined>; data?: unknown }): Promise<T> {
   try {
-    const response = await apiClient.request<T>({
+    const response = await axiosClient.request<T>({
       url,
       method: options?.method ?? 'GET',
       params: options?.params,

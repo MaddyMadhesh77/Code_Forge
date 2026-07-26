@@ -1,7 +1,7 @@
 import {useState} from 'react'
 import PageContainer from '../components/PageContainer'
 import Table from '../components/Table'
-import { useProblems } from '../services/hooks/useProblems'
+import { useProblems } from '../hooks/useProblems'
 import { useNavigate } from 'react-router-dom'
 
 export default function ProblemsList(){
