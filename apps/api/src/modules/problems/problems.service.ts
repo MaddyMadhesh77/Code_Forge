@@ -1,170 +1,107 @@
-type ProblemRecord = {
-  id: string;
-  slug: string;
-  title: string;
-  difficulty: 'EASY' | 'MEDIUM' | 'HARD';
-  isPublished: boolean;
-};
+import {
+  ProblemsRepository,
+  slugify,
+  type CreateProblemInput,
+  type ListProblemsOptions,
+  type ProblemDetail,
+  type ProblemSummary,
+  type UpdateProblemInput,
+} from "./problems.repository.js";
+import { ForbiddenError } from "../../common/errors/app-error.js";
+import type { AuthenticatedUser } from "../../common/guards/jwt-auth.guard.js";
+import type { Paginated } from "../users/users.repository.js";
 
-type CustomTestCaseRecord = {
-  id: string;
-  input: string;
-  expected: string;
-  isHidden: boolean;
-  ordinal: number;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type CustomProblemRecord = {
-  id: string;
-  ownerId: string;
-  teamId: string | null;
-  slug: string;
-  title: string;
-  description: string;
-  difficulty: 'EASY' | 'MEDIUM' | 'HARD';
-  constraints: string | null;
-  starterCode: Record<string, string>;
-  supportedLangs: Array<'python' | 'javascript' | 'cpp' | 'java'>;
-  isPublished: boolean;
-  visibility: 'PRIVATE' | 'TEAM' | 'PUBLIC';
-  testCases: CustomTestCaseRecord[];
-  createdAt: string;
-  updatedAt: string;
-};
-
-const problems: ProblemRecord[] = [
-  {
-    id: '33333333-3333-3333-3333-333333333333',
-    slug: 'two-sum',
-    title: 'Two Sum',
-    difficulty: 'EASY',
-    isPublished: true,
-  },
-  {
-    id: '44444444-4444-4444-4444-444444444444',
-    slug: 'merge-intervals',
-    title: 'Merge Intervals',
-    difficulty: 'MEDIUM',
-    isPublished: true,
-  },
-];
-
-const customProblems: CustomProblemRecord[] = [];
-
-function makeId(prefix: string) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
+/**
+ * Problem catalogue operations.
+ *
+ * All reads and writes go through `ProblemsRepository`, which is the single
+ * place problem lookup happens — previously the same find-by-id logic was
+ * re-implemented in a dozen route handlers, each with slightly different
+ * not-found behaviour.
+ */
 export class ProblemsService {
-  listPublished() {
-    return problems.filter((problem) => problem.isPublished);
+  constructor(private readonly repository: ProblemsRepository) {}
+
+  listPublished(options: ListProblemsOptions = {}): Promise<Paginated<ProblemSummary>> {
+    return this.repository.list(options);
   }
 
-  getPublicBySlug(slug: string) {
-    return this.listPublished().find((problem) => problem.slug === slug) ?? null;
+  getByIdOrSlug(identifier: string): Promise<ProblemDetail> {
+    return this.repository.requireByIdOrSlug(identifier);
   }
 
-  listCustomProblems(teamId?: string, ownerId?: string) {
-    return customProblems.filter((problem) => {
-      if (teamId && problem.teamId !== teamId) {
-        return false;
-      }
+  getHints(identifier: string): Promise<string[]> {
+    return this.repository.getHints(identifier);
+  }
 
-      if (ownerId && problem.ownerId !== ownerId) {
-        return false;
-      }
+  getReferenceSolutions(identifier: string, language?: string) {
+    return this.repository.getReferenceSolutions(identifier).then((solutions) =>
+      language ? solutions.filter((entry) => entry.language === language) : solutions,
+    );
+  }
 
-      return true;
+  createProblem(actor: AuthenticatedUser, input: Omit<CreateProblemInput, "ownerId">) {
+    return this.repository.create({
+      ...input,
+      slug: input.slug ?? slugify(input.title),
+      ownerId: actor.id,
     });
   }
 
-  createCustomProblem(input: {
-    ownerId: string;
-    teamId?: string;
-    title: string;
-    description: string;
-    difficulty: 'EASY' | 'MEDIUM' | 'HARD';
-    constraints?: string | null;
-    starterCode?: Record<string, string>;
-    supportedLangs?: Array<'python' | 'javascript' | 'cpp' | 'java'>;
-    visibility?: 'PRIVATE' | 'TEAM' | 'PUBLIC';
-  }) {
-    const now = new Date().toISOString();
-    const problem: CustomProblemRecord = {
-      id: makeId('custom-problem'),
-      ownerId: input.ownerId,
-      teamId: input.teamId ?? null,
-      slug: input.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      title: input.title,
-      description: input.description,
-      difficulty: input.difficulty,
-      constraints: input.constraints ?? null,
-      starterCode: input.starterCode ?? {},
-      supportedLangs: input.supportedLangs ?? ['python', 'javascript'],
-      isPublished: false,
-      visibility: input.visibility ?? 'PRIVATE',
-      testCases: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    customProblems.push(problem);
-    return problem;
+  /** Only the owner or an ADMIN may edit a problem. */
+  async updateProblem(
+    actor: AuthenticatedUser,
+    identifier: string,
+    patch: UpdateProblemInput,
+  ): Promise<ProblemDetail> {
+    const problem = await this.repository.requireByIdOrSlug(identifier);
+    this.assertCanEdit(actor, problem);
+    return this.repository.update(problem.id, patch);
   }
 
-  getCustomProblem(problemId: string) {
-    return customProblems.find((problem) => problem.id === problemId) ?? null;
-  }
-
-  addPrivateTestCase(
-    problemId: string,
+  async addTestCase(
+    actor: AuthenticatedUser,
+    identifier: string,
     input: { input: string; expected: string; isHidden?: boolean },
   ) {
-    const problem = this.getCustomProblem(problemId);
-
-    if (!problem) {
-      throw new Error('CUSTOM_PROBLEM_NOT_FOUND');
-    }
-
-    const now = new Date().toISOString();
-    const testCase: CustomTestCaseRecord = {
-      id: makeId('custom-test-case'),
-      input: input.input,
-      expected: input.expected,
-      isHidden: input.isHidden ?? true,
-      ordinal: problem.testCases.length,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    problem.testCases.push(testCase);
-    problem.updatedAt = now;
-    return testCase;
+    const problem = await this.repository.requireByIdOrSlug(identifier);
+    this.assertCanEdit(actor, problem);
+    return this.repository.addTestCase(problem.id, input);
   }
 
-  listPrivateTestCases(problemId: string) {
-    const problem = this.getCustomProblem(problemId);
-
-    if (!problem) {
-      throw new Error('CUSTOM_PROBLEM_NOT_FOUND');
-    }
-
-    return [...problem.testCases];
+  /**
+   * Hidden test cases are only returned to someone who may edit the problem —
+   * exposing them to candidates would let them hard-code the expected output.
+   */
+  async listTestCases(actor: AuthenticatedUser | null, identifier: string) {
+    const problem = await this.repository.requireByIdOrSlug(identifier);
+    const canSeeHidden = Boolean(actor && this.canEdit(actor, problem));
+    return this.repository.listTestCases(problem.id, canSeeHidden);
   }
 
-  shareProblemWithTeam(problemId: string, teamId: string) {
-    const problem = this.getCustomProblem(problemId);
+  async setBookmark(actor: AuthenticatedUser, identifier: string, bookmarked: boolean) {
+    const problem = await this.repository.requireByIdOrSlug(identifier);
+    const result = await this.repository.setBookmark(actor.id, problem.id, bookmarked);
+    return { problemId: problem.id, bookmarked: result };
+  }
 
-    if (!problem) {
-      throw new Error('CUSTOM_PROBLEM_NOT_FOUND');
+  listBookmarks(actor: AuthenticatedUser) {
+    return this.repository.listBookmarkedIds(actor.id);
+  }
+
+  async shareWithTeam(actor: AuthenticatedUser, identifier: string, teamId: string) {
+    const problem = await this.repository.requireByIdOrSlug(identifier);
+    this.assertCanEdit(actor, problem);
+    return this.repository.update(problem.id, { teamId, visibility: "TEAM" });
+  }
+
+  private canEdit(actor: AuthenticatedUser, problem: ProblemDetail): boolean {
+    return actor.role === "ADMIN" || problem.ownerId === actor.id;
+  }
+
+  private assertCanEdit(actor: AuthenticatedUser, problem: ProblemDetail): void {
+    if (!this.canEdit(actor, problem)) {
+      throw new ForbiddenError("You do not have permission to modify this problem");
     }
-
-    problem.teamId = teamId;
-    problem.visibility = 'TEAM';
-    problem.updatedAt = new Date().toISOString();
-    return problem;
   }
 }
-
