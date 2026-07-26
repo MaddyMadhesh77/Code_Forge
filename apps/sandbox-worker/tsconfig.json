@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": false,
+    "composite": true,
+    "declaration": true,
+    "sourceMap": true,
+    "ignoreDeprecations": "5.0",
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "references": [{ "path": "../../packages/shared" }],
+  "include": ["src"]
+}
