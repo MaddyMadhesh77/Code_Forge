@@ -1,9 +1,14 @@
 import { PrismaService } from "./prisma.service.js";
+import { getConfig, type AppConfig } from "../config/env.js";
 
 export class DatabaseModule {
-	prisma = new PrismaService();
+  readonly prisma: PrismaService;
 
-	health() {
-		return this.prisma.status();
-	}
+  constructor(config: AppConfig = getConfig()) {
+    this.prisma = new PrismaService(config.databaseUrl);
+  }
+
+  health() {
+    return this.prisma.status();
+  }
 }

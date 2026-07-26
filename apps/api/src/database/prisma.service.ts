@@ -1,78 +1,100 @@
-export class PrismaService {
-  [key: string]: any;
+import { Prisma, PrismaClient } from "@prisma/client";
 
+import { getConfig } from "../config/env.js";
+import { logger } from "../common/logging/logger.js";
+
+const log = logger.child("PrismaService");
+
+export type PrismaHealth = {
+  connected: boolean;
+  datasource: "postgresql";
+  latencyMs?: number;
+  error?: string;
+};
+
+/**
+ * The real Prisma client for this process.
+ *
+ * This used to be an in-memory array pretending to be a database. It is now a
+ * genuine `PrismaClient`: `connect()` opens a pooled connection and fails loudly
+ * if the database is unreachable, so a misconfigured deployment cannot start up
+ * and silently serve fabricated rows.
+ */
+export class PrismaService extends PrismaClient {
   private connected = false;
-  private readonly users = [
-    {
-      id: "user_1",
-      email: "candidate@codeforge.dev",
-      displayName: "Candidate",
-      role: "CANDIDATE" as const,
-      avatarUrl: null as string | null,
-      isActive: true,
-    },
-    {
-      id: "user_2",
-      email: "interviewer@codeforge.dev",
-      displayName: "Interviewer",
-      role: "INTERVIEWER" as const,
-      avatarUrl: null as string | null,
-      isActive: true,
-    },
-  ];
 
-  connect() {
+  constructor(datasourceUrl: string = getConfig().databaseUrl) {
+    super({
+      datasources: { db: { url: datasourceUrl } },
+      log: [
+        { emit: "event", level: "warn" },
+        { emit: "event", level: "error" },
+      ],
+    });
+
+    // Prisma's typed event emitter doesn't narrow well through the subclass;
+    // the casts keep the listeners without loosening the rest of the client.
+    (this as unknown as { $on: (event: string, cb: (e: { message: string }) => void) => void }).$on(
+      "warn",
+      (event) => log.warn(event.message),
+    );
+    (this as unknown as { $on: (event: string, cb: (e: { message: string }) => void) => void }).$on(
+      "error",
+      (event) => log.error(event.message),
+    );
+  }
+
+  async connect(): Promise<PrismaHealth> {
+    await this.$connect();
     this.connected = true;
-    return { status: "connected" as const };
+    log.info("Connected to PostgreSQL");
+    return this.status();
   }
 
-  disconnect() {
+  async disconnect(): Promise<void> {
+    await this.$disconnect();
     this.connected = false;
-    return { status: "disconnected" as const };
   }
 
-  status() {
-    return {
-      connected: this.connected,
-      datasource: "postgresql",
-      schemaPath: "apps/api/prisma/schema.prisma",
-    };
-  }
+  /** Round-trips a trivial query so health checks reflect the real connection. */
+  async status(): Promise<PrismaHealth> {
+    const startedAt = Date.now();
 
-  userFindMany() {
-    return [...this.users];
-  }
-
-  userFindUnique(id: string) {
-    return this.users.find((user) => user.id === id);
-  }
-
-  userUpdate(id: string, data: { displayName?: string; avatarUrl?: string | null }) {
-    const user = this.userFindUnique(id);
-
-    if (!user) {
-      throw new Error("USER_NOT_FOUND");
+    try {
+      await this.$queryRaw`SELECT 1`;
+      this.connected = true;
+      return { connected: true, datasource: "postgresql", latencyMs: Date.now() - startedAt };
+    } catch (error) {
+      this.connected = false;
+      return {
+        connected: false,
+        datasource: "postgresql",
+        error: error instanceof Error ? error.message : "unknown error",
+      };
     }
-
-    if (typeof data.displayName === "string") {
-      user.displayName = data.displayName;
-    }
-
-    if (data.avatarUrl !== undefined) {
-      user.avatarUrl = data.avatarUrl;
-    }
-
-    return user;
   }
 
-  userSetActive(id: string, isActive: boolean) {
-    const user = this.userFindUnique(id);
-
-    if (!user) {
-      throw new Error("USER_NOT_FOUND");
-    }
-
-    user.isActive = isActive;
-    return user;
+  get isConnected(): boolean {
+    return this.connected;
   }
+}
+
+/** True when Prisma rejected a write because a unique constraint already held. */
+export function isUniqueViolation(error: unknown, target?: string): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
+    return false;
+  }
+
+  if (!target) {
+    return true;
+  }
+
+  const meta = error.meta as { target?: string[] | string } | undefined;
+  const fields = Array.isArray(meta?.target) ? meta.target : [meta?.target].filter(Boolean);
+  return fields.some((field) => String(field).includes(target));
+}
+
+/** True when Prisma could not find the row an update/delete targeted. */
+export function isNotFound(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025";
 }

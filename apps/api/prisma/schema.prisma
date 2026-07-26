@@ -37,6 +37,26 @@ enum SessionStatus {
   CANCELLED
 }
 
+enum ParticipantRole {
+  INTERVIEWER
+  CANDIDATE
+  OBSERVER
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ProblemVisibility {
+  PRIVATE
+  TEAM
+  PUBLIC
+}
+
 model User {
   id             String    @id @default(uuid())
   email          String    @unique
@@ -52,13 +72,22 @@ model User {
   submissions     Submission[]
   createdSessions InterviewSession[]  @relation("SessionCreator")
   participations  SessionParticipant[]
+  ownedProblems   Problem[]           @relation("ProblemOwner")
+  bookmarks       ProblemBookmark[]
+  executionRuns   ExecutionRun[]
+  scorecards      Scorecard[]         @relation("ScorecardAuthor")
+  notes           InterviewNote[]     @relation("NoteAuthor")
 
+  @@index([email])
   @@map("users")
 }
 
+/// Stores a SHA-256 digest of the refresh token, never the token itself, so a
+/// database leak cannot be replayed against the auth endpoints.
 model RefreshToken {
   id        String    @id @default(uuid())
-  token     String    @unique
+  tokenHash String    @unique @map("token_hash")
+  jti       String    @unique
   userId    String    @map("user_id")
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime  @map("expires_at")
@@ -68,27 +97,55 @@ model RefreshToken {
 
   @@index([userId])
   @@index([family])
+  @@index([expiresAt])
   @@map("refresh_tokens")
 }
 
 model Problem {
-  id             String      @id @default(uuid())
+  id             String            @id @default(uuid())
   title          String
-  slug           String      @unique
+  slug           String            @unique
   description    String
   difficulty     Difficulty
   constraints    String?
-  starterCode    Json        @map("starter_code")
-  supportedLangs String[]    @map("supported_langs")
-  isPublished    Boolean     @default(false) @map("is_published")
-  createdAt      DateTime    @default(now()) @map("created_at")
-  updatedAt      DateTime    @updatedAt @map("updated_at")
+  starterCode    Json              @map("starter_code")
+  supportedLangs String[]          @map("supported_langs")
+  tags           String[]          @default([])
+  /// Worked examples: [{ input, output, explanation }]
+  samples        Json              @default("[]")
+  hints          String[]          @default([])
+  editorial      String?
+  referenceSolutions Json          @default("{}") @map("reference_solutions")
+  isPublished    Boolean           @default(false) @map("is_published")
+  visibility     ProblemVisibility @default(PUBLIC)
+  ownerId        String?           @map("owner_id")
+  owner          User?             @relation("ProblemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  teamId         String?           @map("team_id")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
 
   testCases       TestCase[]
   submissions     Submission[]
   sessionProblems InterviewSessionProblem[]
+  bookmarks       ProblemBookmark[]
+  executionRuns   ExecutionRun[]
 
+  @@index([isPublished])
+  @@index([ownerId])
+  @@index([teamId])
   @@map("problems")
+}
+
+model ProblemBookmark {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problemId String   @map("problem_id")
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, problemId])
+  @@map("problem_bookmarks")
 }
 
 model TestCase {
@@ -140,10 +197,24 @@ model InterviewSession {
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
 
-  participants SessionParticipant[]
-  problems     InterviewSessionProblem[]
-  submissions  Submission[]
+  /// Set when the session was created from a template.
+  templateId  String?       @map("template_id")
+  role        String?
+  level       String?
 
+  participants    SessionParticipant[]
+  problems        InterviewSessionProblem[]
+  submissions     Submission[]
+  executionRuns   ExecutionRun[]
+  scorecards      Scorecard[]
+  notes           InterviewNote[]
+  report          InterviewReport?
+  recording       InterviewRecording?
+  antiCheatEvents AntiCheatEvent[]
+  links           SessionLink[]
+
+  @@index([creatorId])
+  @@index([status])
   @@map("interview_sessions")
 }
 
@@ -152,11 +223,12 @@ model SessionParticipant {
   sessionId String           @map("session_id")
   session   InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   userId    String           @map("user_id")
-  user      User             @relation(fields: [userId], references: [id])
-  role      Role
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      ParticipantRole
   joinedAt  DateTime         @default(now()) @map("joined_at")
 
   @@unique([sessionId, userId])
+  @@index([userId])
   @@map("session_participants")
 }
 
@@ -170,4 +242,233 @@ model InterviewSessionProblem {
 
   @@unique([sessionId, problemId])
   @@map("interview_session_problems")
+}
+
+/// A single "run this code" request. Previously held in an in-memory Map, so
+/// every in-flight run was lost on restart.
+model ExecutionRun {
+  id           String            @id @default(uuid())
+  userId       String?           @map("user_id")
+  user         User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  problemId    String            @map("problem_id")
+  problem      Problem           @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  sessionId    String?           @map("session_id")
+  session      InterviewSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  submissionId String?           @unique @map("submission_id")
+  language     String
+  code         String
+  status       RunStatus         @default(PENDING)
+  stdout       String            @default("")
+  stderr       String            @default("")
+  /// [{ id, name, status, runtimeMs }]
+  testResults  Json              @default("[]") @map("test_results")
+  runtimeMs    Int?              @map("runtime_ms")
+  memoryKb     Int?              @map("memory_kb")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  completedAt  DateTime?         @map("completed_at")
+
+  @@index([sessionId])
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("execution_runs")
+}
+
+/// One scorecard per interviewer per session. `authorId` is the interviewer;
+/// `candidateId` is who was assessed.
+model Scorecard {
+  id             String           @id @default(uuid())
+  sessionId      String           @map("session_id")
+  session        InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  authorId       String           @map("author_id")
+  author         User             @relation("ScorecardAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  candidateId    String?          @map("candidate_id")
+  /// Rubric dimension -> integer score, validated at the service boundary.
+  scores         Json
+  overall        Int
+  recommendation String           @default("NO_DECISION")
+  feedback       String           @default("")
+  submittedAt    DateTime         @default(now()) @map("submitted_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  @@unique([sessionId, authorId])
+  @@index([sessionId])
+  @@index([candidateId])
+  @@map("scorecards")
+}
+
+model InterviewNote {
+  id        String           @id @default(uuid())
+  sessionId String           @map("session_id")
+  session   InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  authorId  String           @map("author_id")
+  author    User             @relation("NoteAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@index([sessionId, createdAt])
+  @@map("interview_notes")
+}
+
+model InterviewReport {
+  id          String           @id @default(uuid())
+  sessionId   String           @unique @map("session_id")
+  session     InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  summary     String
+  /// Rendered report payload used for PDF export and the public share view.
+  content     Json             @default("{}")
+  shareToken  String?          @unique @map("share_token")
+  shareExpiry DateTime?        @map("share_expiry")
+  generatedAt DateTime         @default(now()) @map("generated_at")
+
+  @@map("interview_reports")
+}
+
+model Webhook {
+  id         String    @id @default(uuid())
+  tenantId   String    @map("tenant_id")
+  url        String
+  events     String[]
+  /// HMAC secret used to sign deliveries so receivers can verify origin.
+  secret     String
+  isActive   Boolean   @default(true) @map("is_active")
+  failureCount Int     @default(0) @map("failure_count")
+  lastError    String? @map("last_error")
+  lastDeliveryAt DateTime? @map("last_delivery_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@map("webhooks")
+}
+
+enum RecordingStatus {
+  PENDING
+  RECORDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+/// Mirrors `antiCheatEventTypeSchema` in @codeforge/shared, which is the
+/// canonical vocabulary shared with the web client.
+enum AntiCheatEventType {
+  TAB_SWITCH
+  COPY_ATTEMPT
+  PASTE_ATTEMPT
+  WINDOW_BLUR
+  EXTERNAL_TOOL_DETECTED
+}
+
+model InterviewRecording {
+  id          String           @id @default(uuid())
+  sessionId   String           @unique @map("session_id")
+  session     InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  status      RecordingStatus  @default(RECORDING)
+  startedAt   DateTime         @default(now()) @map("started_at")
+  stoppedAt   DateTime?        @map("stopped_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  events    RecordingEvent[]
+  snapshots CodeSnapshot[]
+  artifacts RecordingArtifact[]
+
+  @@map("interview_recordings")
+}
+
+/// Timeline events are append-only rows rather than entries in a JSON column.
+/// The previous read-modify-write on a JSON array lost events whenever two
+/// arrived concurrently.
+model RecordingEvent {
+  id          String             @id @default(uuid())
+  recordingId String             @map("recording_id")
+  recording   InterviewRecording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  payload     Json
+  timestamp   DateTime           @default(now())
+
+  @@index([recordingId, timestamp])
+  @@map("recording_events")
+}
+
+model CodeSnapshot {
+  id          String             @id @default(uuid())
+  recordingId String             @map("recording_id")
+  recording   InterviewRecording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  payload     Json
+  timestamp   DateTime           @default(now())
+
+  @@index([recordingId, timestamp])
+  @@map("code_snapshots")
+}
+
+model RecordingArtifact {
+  id          String             @id @default(uuid())
+  recordingId String             @map("recording_id")
+  recording   InterviewRecording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  fileName    String             @map("file_name")
+  mimeType    String             @map("mime_type")
+  sizeBytes   Int                @map("size_bytes")
+  durationMs  Int?               @map("duration_ms")
+  source      String?
+  storageUrl  String?            @map("storage_url")
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  @@index([recordingId, createdAt])
+  @@map("recording_artifacts")
+}
+
+/// Proctoring signals raised during a session. Stored so a report can cite
+/// concrete evidence rather than a number that vanished with the process.
+model AntiCheatEvent {
+  id            String             @id @default(uuid())
+  sessionId     String             @map("session_id")
+  session       InterviewSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  participantId String             @map("participant_id")
+  eventType     AntiCheatEventType @map("event_type")
+  severity      Int                @default(1)
+  details       Json               @default("{}")
+  timestamp     DateTime           @default(now())
+
+  @@index([sessionId, timestamp])
+  @@index([sessionId, participantId])
+  @@map("anti_cheat_events")
+}
+
+/// A single-use-ish invite link granting access to a session.
+model SessionLink {
+  id         String           @id @default(uuid())
+  sessionId  String           @map("session_id")
+  session    InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the token; the raw value is only ever returned at creation.
+  tokenHash  String           @unique @map("token_hash")
+  role       ParticipantRole  @default(CANDIDATE)
+  createdById String          @map("created_by_id")
+  expiresAt  DateTime         @map("expires_at")
+  revokedAt  DateTime?        @map("revoked_at")
+  usedAt     DateTime?        @map("used_at")
+  maxUses    Int              @default(1) @map("max_uses")
+  useCount   Int              @default(0) @map("use_count")
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@map("session_links")
+}
+
+model InterviewTemplate {
+  id              String   @id @default(uuid())
+  title           String
+  role            String
+  level           String?
+  problemIds      String[] @map("problem_ids")
+  durationMinutes Int      @default(60) @map("duration_minutes")
+  tags            String[] @default([])
+  rubricNotes     String[] @default([]) @map("rubric_notes")
+  isPrivate       Boolean  @default(true) @map("is_private")
+  createdById     String   @map("created_by_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([role])
+  @@index([createdById])
+  @@map("interview_templates")
 }
