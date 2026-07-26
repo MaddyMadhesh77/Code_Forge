@@ -1,246 +1,264 @@
+import { createHash, randomBytes } from "node:crypto";
+import type { ParticipantRole, SessionStatus } from "@prisma/client";
 
-import { PrismaService } from '../../database/prisma.service.js';
-import { CreateInterviewDto, CreateSessionLinkDto, JoinInterviewDto } from './dto/index.js';
-import * as crypto from 'crypto';
+import type { CreateInterviewDto, CreateSessionLinkDto, JoinInterviewDto } from "./dto/index.js";
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  UnauthorizedError,
+} from "../../common/errors/app-error.js";
+import { PrismaService } from "../../database/prisma.service.js";
 
+const DEFAULT_LINK_TTL_SECONDS = 24 * 60 * 60;
+const MAX_LINK_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+/**
+ * Hashes an invite token for storage. Join links are bearer credentials, so
+ * only the digest is persisted — the raw token is returned once, at creation.
+ */
+function hashLinkToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 export class InterviewsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async createInterview(userId: string, data: CreateInterviewDto) {
     if (!data.problemId) {
-      throw new Error('Problem is required to create an interview');
+      throw new BadRequestError("A problemId is required", undefined, "MISSING_PROBLEM");
     }
 
-    // Verify problem exists
     const problem = await this.prisma.problem.findUnique({
       where: { id: data.problemId },
+      select: { id: true },
     });
 
     if (!problem) {
-      throw new Error('Problem not found');
+      throw new NotFoundError("Problem", "PROBLEM_NOT_FOUND");
     }
 
-    const session = await this.prisma.interviewSession.create({
-      data: {
-        title: data.title,
-        creatorId: userId,
-        templateId: data.templateId ?? null,
-        role: data.role ?? null,
-        level: data.level ?? null,
-        scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : undefined,
-        participants: {
-          create: {
-            userId,
-            role: 'INTERVIEWER',
-          },
+    // Session, participant, problem link and recording are created together —
+    // a failure partway through must not leave a session with no interviewer.
+    return this.prisma.$transaction(async (tx) => {
+      const session = await tx.interviewSession.create({
+        data: {
+          title: data.title,
+          creatorId: userId,
+          templateId: data.templateId ?? null,
+          role: data.role ?? null,
+          level: data.level ?? null,
+          scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : undefined,
+          participants: { create: { userId, role: "INTERVIEWER" } },
+          problems: { create: { problemId: data.problemId as string, ordinal: 0 } },
         },
-        problems: {
-          create: {
-            problemId: data.problemId,
-            ordinal: 0,
-          },
-        },
-      },
-      include: {
-        participants: true,
-        problems: true,
-      },
-    });
+        include: { participants: true, problems: true },
+      });
 
-    // Start recording
-    await this.prisma.interviewRecording.create({
-      data: {
-        sessionId: session.id,
-      },
-    });
+      await tx.interviewRecording.create({ data: { sessionId: session.id } });
 
-    return session;
+      return session;
+    });
   }
 
-  async getInterview(sessionId: string) {
-    return await this.prisma.interviewSession.findUnique({
+  getInterview(sessionId: string) {
+    return this.prisma.interviewSession.findUnique({
       where: { id: sessionId },
       include: {
         participants: {
           include: {
-            user: {
-              select: {
-                id: true,
-                displayName: true,
-                email: true,
-                avatarUrl: true,
-              },
-            },
+            user: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
           },
         },
-        problems: {
-          include: {
-            problem: true,
-          },
-        },
+        problems: { include: { problem: true } },
         submissions: true,
       },
     });
   }
 
-  async listInterviews(userId: string, limit = 10, offset = 0) {
-    return await this.prisma.interviewSession.findMany({
-      where: {
-        participants: {
-          some: {
-            userId,
-          },
-        },
-      },
-      include: {
-        participants: true,
-        problems: true,
-      },
-      take: limit,
-      skip: offset,
-      orderBy: { createdAt: 'desc' },
+  listInterviews(userId: string, limit = 10, offset = 0) {
+    return this.prisma.interviewSession.findMany({
+      where: { participants: { some: { userId } } },
+      include: { participants: true, problems: true },
+      take: Math.min(Math.max(limit, 1), 100),
+      skip: Math.max(offset, 0),
+      orderBy: { createdAt: "desc" },
     });
   }
 
   async updateInterviewStatus(sessionId: string, status: string) {
-    if (!['SCHEDULED', 'ACTIVE', 'COMPLETED', 'CANCELLED'].includes(status)) {
-      throw new Error('Invalid status');
+    const allowed: SessionStatus[] = ["SCHEDULED", "ACTIVE", "COMPLETED", "CANCELLED"];
+
+    if (!allowed.includes(status as SessionStatus)) {
+      throw new BadRequestError(`Invalid status: ${status}`, undefined, "INVALID_STATUS");
     }
 
-    return await this.prisma.interviewSession.update({
+    return this.prisma.interviewSession.update({
       where: { id: sessionId },
       data: {
-        status: status as any,
-        startedAt: status === 'ACTIVE' ? new Date() : undefined,
-        endedAt: status === 'COMPLETED' || status === 'CANCELLED' ? new Date() : undefined,
+        status: status as SessionStatus,
+        startedAt: status === "ACTIVE" ? new Date() : undefined,
+        endedAt: status === "COMPLETED" || status === "CANCELLED" ? new Date() : undefined,
       },
     });
   }
 
+  /**
+   * Issues a join link. Returns the raw token exactly once; only its digest is
+   * stored, so a database dump cannot be replayed to join interviews.
+   */
   async createSessionLink(sessionId: string, userId: string, data: CreateSessionLinkDto) {
-    // Verify user is creator/interviewer
     const session = await this.prisma.interviewSession.findUnique({
       where: { id: sessionId },
       include: { participants: true },
     });
 
     if (!session) {
-      throw new Error('Session not found');
+      throw new NotFoundError("Session", "SESSION_NOT_FOUND");
     }
 
-    const isAuthorized = session.creatorId === userId || 
-      session.participants.some((p: any) => p.userId === userId && p.role === 'INTERVIEWER');
+    const isAuthorized =
+      session.creatorId === userId ||
+      session.participants.some(
+        (participant) => participant.userId === userId && participant.role === "INTERVIEWER",
+      );
 
     if (!isAuthorized) {
-      throw new Error('Not authorized to create session links');
+      throw new ForbiddenError("Only an interviewer can create session links");
     }
 
-    const token = this.generateSecureToken();
-    const expiresAt = data.expiresIn
-      ? new Date(Date.now() + data.expiresIn * 1000)
-      : null;
+    const token = randomBytes(32).toString("base64url");
+    const ttlSeconds = Math.min(
+      Math.max(data.expiresIn ?? DEFAULT_LINK_TTL_SECONDS, 60),
+      MAX_LINK_TTL_SECONDS,
+    );
 
-    return await this.prisma.sessionLink.create({
+    const link = await this.prisma.sessionLink.create({
       data: {
         sessionId,
-        role: data.role,
-        token,
-        expiresAt,
-        createdBy: userId,
+        role: (data.role ?? "CANDIDATE") as ParticipantRole,
+        tokenHash: hashLinkToken(token),
+        // Links always expire; an unbounded invite is a standing back door.
+        expiresAt: new Date(Date.now() + ttlSeconds * 1000),
+        createdById: userId,
+        maxUses: 1,
       },
     });
+
+    return { ...link, token };
   }
 
+  /** Redeems a join link and adds the caller as a participant. */
   async joinSession(data: JoinInterviewDto, userId: string) {
+    if (!data.token) {
+      throw new BadRequestError("A join token is required", undefined, "MISSING_TOKEN");
+    }
+
     const link = await this.prisma.sessionLink.findUnique({
-      where: { token: data.token },
+      where: { tokenHash: hashLinkToken(data.token) },
       include: { session: true },
     });
 
     if (!link) {
-      throw new Error('Invalid or expired link');
+      throw new UnauthorizedError("Invalid join link", "INVALID_LINK");
     }
 
-    if (link.isRevoked) {
-      throw new Error('This link has been revoked');
+    if (link.revokedAt) {
+      throw new UnauthorizedError("This link has been revoked", "LINK_REVOKED");
     }
 
-    if (link.expiresAt && link.expiresAt < new Date()) {
-      throw new Error('This link has expired');
+    if (link.expiresAt.getTime() <= Date.now()) {
+      throw new UnauthorizedError("This link has expired", "LINK_EXPIRED");
     }
 
-    // Check if user already in session
-    const existing = await this.prisma.sessionParticipant.findFirst({
-      where: {
-        sessionId: link.sessionId,
-        userId,
-      },
+    const existing = await this.prisma.sessionParticipant.findUnique({
+      where: { sessionId_userId: { sessionId: link.sessionId, userId } },
     });
 
+    // Re-joining with a link you already redeemed is fine and does not consume
+    // another use.
     if (existing) {
       return link.session;
     }
 
-    // Add participant
-    await this.prisma.sessionParticipant.create({
-      data: {
-        sessionId: link.sessionId,
-        userId,
-        role: link.role,
-      },
-    });
+    if (link.useCount >= link.maxUses) {
+      throw new ConflictError("This link has already been used", "LINK_EXHAUSTED");
+    }
 
-    return link.session;
+    return this.prisma.$transaction(async (tx) => {
+      // Conditional increment: two simultaneous redemptions cannot both pass.
+      const claimed = await tx.sessionLink.updateMany({
+        where: { id: link.id, useCount: { lt: link.maxUses }, revokedAt: null },
+        data: { useCount: { increment: 1 }, usedAt: new Date() },
+      });
+
+      if (claimed.count === 0) {
+        throw new ConflictError("This link has already been used", "LINK_EXHAUSTED");
+      }
+
+      await tx.sessionParticipant.create({
+        data: { sessionId: link.sessionId, userId, role: link.role },
+      });
+
+      return link.session;
+    });
   }
 
   async revokeSessionLink(linkId: string, userId: string) {
     const link = await this.prisma.sessionLink.findUnique({
       where: { id: linkId },
-      include: { session: true },
+      include: { session: { select: { creatorId: true } } },
     });
 
     if (!link) {
-      throw new Error('Link not found');
+      throw new NotFoundError("Session link", "LINK_NOT_FOUND");
     }
 
-    // Verify authorization
-    if (link.session.creatorId !== userId && link.createdBy !== userId) {
-      throw new Error('Not authorized to revoke this link');
+    if (link.session.creatorId !== userId && link.createdById !== userId) {
+      throw new ForbiddenError("Not authorized to revoke this link");
     }
 
-    return await this.prisma.sessionLink.update({
+    return this.prisma.sessionLink.update({
       where: { id: linkId },
-      data: { isRevoked: true },
+      data: { revokedAt: new Date() },
     });
   }
 
   async getSessionLinks(sessionId: string, userId: string) {
     const session = await this.prisma.interviewSession.findUnique({
       where: { id: sessionId },
+      select: { creatorId: true },
     });
 
     if (!session) {
-      throw new Error('Session not found');
+      throw new NotFoundError("Session", "SESSION_NOT_FOUND");
     }
 
-    // Verify authorization
     if (session.creatorId !== userId) {
-      throw new Error('Not authorized');
+      throw new ForbiddenError("Only the session creator can list its links");
     }
 
-    return await this.prisma.sessionLink.findMany({
+    // `tokenHash` is deliberately not selected — it must never leave the server.
+    return this.prisma.sessionLink.findMany({
       where: { sessionId },
-      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        sessionId: true,
+        role: true,
+        expiresAt: true,
+        revokedAt: true,
+        usedAt: true,
+        useCount: true,
+        maxUses: true,
+        createdById: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
     });
   }
 
-  async endSession(sessionId: string) {
-    return await this.updateInterviewStatus(sessionId, 'COMPLETED');
-  }
-
-  private generateSecureToken(length = 32): string {
-    return crypto.randomBytes(length).toString('hex');
+  endSession(sessionId: string) {
+    return this.updateInterviewStatus(sessionId, "COMPLETED");
   }
 }
-

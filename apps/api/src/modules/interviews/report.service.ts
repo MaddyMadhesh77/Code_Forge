@@ -1,35 +1,39 @@
 
-import { PrismaService } from '../../database/prisma.service.js';
-import * as crypto from 'crypto';
+import { randomBytes } from 'node:crypto';
 
+import { NotFoundError, UnauthorizedError } from '../../common/errors/app-error.js';
+import { PrismaService } from '../../database/prisma.service.js';
+
+
+const SHARE_LINK_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export class ReportService {
   constructor(private prisma: PrismaService) {}
 
-  async createReport(
-    sessionId: string,
-    scorecardId?: string,
-  ) {
+  async createReport(sessionId: string) {
     const session = await this.prisma.interviewSession.findUnique({
       where: { id: sessionId },
     });
 
     if (!session) {
-      throw new Error('Session not found');
+      throw new NotFoundError('Session', 'SESSION_NOT_FOUND');
     }
 
-    const shareToken = this.generateShareToken();
-
-    const report = await this.prisma.interviewReport.create({
-      data: {
+    // Upsert: regenerating a report replaces the previous one rather than
+    // failing on the one-report-per-session constraint.
+    return this.prisma.interviewReport.upsert({
+      where: { sessionId },
+      create: {
         sessionId,
-        scorecard_id: scorecardId,
-        shareToken,
-        shareExpiry: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+        summary: `Interview report for ${session.title}`,
+        shareToken: this.generateShareToken(),
+        shareExpiry: new Date(Date.now() + SHARE_LINK_TTL_MS),
+      },
+      update: {
+        summary: `Interview report for ${session.title}`,
+        generatedAt: new Date(),
       },
     });
-
-    return report;
   }
 
   async getReportBySessionId(sessionId: string) {
@@ -44,11 +48,11 @@ export class ReportService {
     });
 
     if (!report) {
-      throw new Error('Report not found or access denied');
+      throw new NotFoundError('Report', 'REPORT_NOT_FOUND');
     }
 
-    if (report.shareExpiry && report.shareExpiry < new Date()) {
-      throw new Error('Share link has expired');
+    if (!report.shareExpiry || report.shareExpiry < new Date()) {
+      throw new UnauthorizedError('Share link has expired', 'SHARE_LINK_EXPIRED');
     }
 
     return report;
@@ -83,16 +87,17 @@ export class ReportService {
     });
 
     if (!session) {
-      throw new Error('Session not found');
+      throw new NotFoundError('Session', 'SESSION_NOT_FOUND');
     }
 
-    const scorecards = await this.prisma.interviewScorecard.findMany({
+    const scorecards = await this.prisma.scorecard.findMany({
       where: { sessionId },
     });
 
     const recording = includeRecording
       ? await this.prisma.interviewRecording.findUnique({
           where: { sessionId },
+          include: { _count: { select: { events: true, snapshots: true } } },
         })
       : null;
 
@@ -121,11 +126,11 @@ export class ReportService {
         difficulty: p.problem.difficulty,
       })),
       submissionCount: session.submissions.length,
-      scorecards: scorecards.map((s: any) => ({
-        interviewerId: s.interviewerId,
-        scores: s.scores,
-        feedback: s.feedback,
-        overallRating: s.overallRating,
+      scorecards: scorecards.map((scorecard) => ({
+        interviewerId: scorecard.authorId,
+        scores: scorecard.scores,
+        feedback: scorecard.feedback,
+        overallRating: scorecard.overall,
       })),
       antiCheatSummary: {
         totalEvents: antiCheatReport.length,
@@ -134,15 +139,15 @@ export class ReportService {
       },
       ...(recording && {
         recordingDuration: this.calculateRecordingDuration(recording),
-        codeSnapshotCount: (recording.codeSnapshots as any[])?.length || 0,
-        eventCount: (recording.events as any[])?.length || 0,
+        codeSnapshotCount: recording._count.snapshots,
+        eventCount: recording._count.events,
       }),
     };
 
     return format === 'JSON' ? exportData : this.formatForPDF(exportData);
   }
 
-  private calculateDuration(startTime?: Date, endTime?: Date): number {
+  private calculateDuration(startTime?: Date | null, endTime?: Date | null): number {
     if (!startTime || !endTime) return 0;
     return Math.round((endTime.getTime() - startTime.getTime()) / 1000 / 60); // in minutes
   }
@@ -260,8 +265,10 @@ export class ReportService {
     });
   }
 
+  /** 32 bytes of CSPRNG output — the token is the only credential for the
+   * public report view, so it must not be guessable. */
   private generateShareToken(): string {
-    return crypto.randomBytes(16).toString('hex');
+    return randomBytes(32).toString('base64url');
   }
 }
 

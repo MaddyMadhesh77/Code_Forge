@@ -1,181 +1,112 @@
-import { IsUUID, IsString, IsOptional, IsEnum, IsNumber, Min, Max } from 'class-validator';
-import { InterviewRole } from '@codeforge/shared';
+import { z } from "zod";
 
-const SCORECARD_CRITERIA_VALUES = [
-  'PROBLEM_SOLVING',
-  'COMMUNICATION',
-  'DEBUGGING',
-  'CODE_QUALITY',
-  'TIME_MANAGEMENT',
-  'TESTING_APPROACH',
-] as const;
+/**
+ * Interview request shapes.
+ *
+ * These were `class-validator`-decorated classes, but `class-validator` was
+ * never installed — only type-shimmed — so the decorators validated nothing at
+ * runtime while looking like they did. They are now Zod schemas that actually
+ * run, with the types derived via `z.infer` so shape and validation cannot
+ * drift apart.
+ */
 
-type ScorecardCriteriaValue = typeof SCORECARD_CRITERIA_VALUES[number];
+export const scorecardCriteriaSchema = z.enum([
+  "PROBLEM_SOLVING",
+  "COMMUNICATION",
+  "DEBUGGING",
+  "CODE_QUALITY",
+  "TIME_MANAGEMENT",
+  "TESTING_APPROACH",
+]);
 
-export class CreateInterviewDto {
-  @IsString()
-  title: string;
+export type ScorecardCriteriaValue = z.infer<typeof scorecardCriteriaSchema>;
 
-  @IsOptional()
-  @IsUUID()
-  problemId?: string;
+const rubricScore = z.number().int().min(1).max(5);
 
-  @IsOptional()
-  @IsString()
-  templateId?: string;
+export const createInterviewSchema = z.object({
+  title: z.string().min(1).max(200),
+  problemId: z.string().uuid().optional(),
+  templateId: z.string().min(1).max(200).optional(),
+  role: z.string().min(1).max(50).optional(),
+  level: z.string().min(1).max(50).optional(),
+  scheduledAt: z.string().datetime().optional(),
+});
 
-  @IsOptional()
-  @IsString()
-  role?: string;
+export const createSessionLinkSchema = z.object({
+  role: z.enum(["INTERVIEWER", "CANDIDATE", "OBSERVER"]).default("CANDIDATE"),
+  /** Seconds until the link expires; the service clamps this to a safe range. */
+  expiresIn: z.number().int().positive().optional(),
+});
 
-  @IsOptional()
-  @IsString()
-  level?: string;
+export const joinInterviewSchema = z.object({
+  token: z.string().min(16).max(500),
+});
 
-  @IsOptional()
-  @IsString()
-  scheduledAt?: string;
-}
+export const createScorecardSchema = z.object({
+  criteria: z.array(scorecardCriteriaSchema).optional(),
+  problemSolving: rubricScore,
+  communication: rubricScore,
+  debugging: rubricScore,
+  codeQuality: rubricScore,
+  timeManagement: rubricScore,
+  testingApproach: rubricScore,
+  feedback: z.string().max(20_000).optional(),
+  overallRating: rubricScore.optional(),
+});
 
-export class CreateSessionLinkDto {
-  @IsEnum(['INTERVIEWER', 'CANDIDATE', 'OBSERVER'])
-  role: InterviewRole;
+export const exportInterviewSchema = z.object({
+  format: z.enum(["PDF", "JSON"]),
+  includeRecording: z.boolean().default(false),
+});
 
-  @IsOptional()
-  @IsNumber()
-  expiresIn?: number;
-}
+export const updateInterviewStatusSchema = z.object({
+  status: z.enum(["SCHEDULED", "ACTIVE", "COMPLETED", "CANCELLED"]),
+});
 
-export class JoinInterviewDto {
-  @IsString()
-  token: string;
-}
+export const analyzeComplexitySchema = z.object({
+  code: z.string().min(1).max(200_000),
+  /** Selects the brace- or indentation-based nesting analysis. */
+  language: z.string().min(1).max(30).optional(),
+});
 
-export class CreateScorecardDto {
-  @IsEnum(SCORECARD_CRITERIA_VALUES, { each: true })
-  criteria: ScorecardCriteriaValue[];
+export const reviewCodeSchema = z.object({
+  code: z.string().min(1).max(200_000),
+  language: z.string().min(1).max(30),
+});
 
-  @IsNumber()
-  @Min(1)
-  @Max(5)
-  problemSolving: number;
+export const sendInviteEmailSchema = z.object({
+  to: z.string().email(),
+  candidateName: z.string().min(1).max(200),
+  interviewerName: z.string().min(1).max(200),
+  sessionTitle: z.string().min(1).max(200),
+  interviewLink: z.string().url(),
+  scheduledAt: z.string().datetime().optional(),
+});
 
-  @IsNumber()
-  @Min(1)
-  @Max(5)
-  communication: number;
+export const sendReportEmailSchema = z.object({
+  to: z.string().email(),
+  sessionTitle: z.string().min(1).max(200),
+  reportUrl: z.string().url(),
+});
 
-  @IsNumber()
-  @Min(1)
-  @Max(5)
-  debugging: number;
+export const uploadRecordingArtifactSchema = z.object({
+  fileName: z.string().min(1).max(255),
+  mimeType: z.string().min(1).max(120),
+  // Bounded so a client cannot claim an implausible size.
+  sizeBytes: z.number().int().min(1).max(5_000_000_000),
+  durationMs: z.number().int().min(0).optional(),
+  source: z.enum(["webcam", "screen"]).optional(),
+  storageUrl: z.string().url().optional(),
+});
 
-  @IsNumber()
-  @Min(1)
-  @Max(5)
-  codeQuality: number;
-
-  @IsNumber()
-  @Min(1)
-  @Max(5)
-  timeManagement: number;
-
-  @IsNumber()
-  @Min(1)
-  @Max(5)
-  testingApproach: number;
-
-  @IsOptional()
-  @IsString()
-  feedback?: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(1)
-  @Max(5)
-  overallRating?: number;
-}
-
-export class ExportInterviewDto {
-  @IsEnum(['PDF', 'JSON'])
-  format: 'PDF' | 'JSON';
-
-  @IsOptional()
-  includeRecording?: boolean;
-}
-
-export class UpdateInterviewStatusDto {
-  @IsEnum(['SCHEDULED', 'ACTIVE', 'COMPLETED', 'CANCELLED'])
-  status: 'SCHEDULED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
-}
-
-export class AnalyzeComplexityDto {
-  @IsString()
-  code: string;
-}
-
-export class ReviewCodeDto {
-  @IsString()
-  code: string;
-
-  @IsString()
-  language: string;
-}
-
-export class SendInviteEmailDto {
-  @IsString()
-  to: string;
-
-  @IsString()
-  candidateName: string;
-
-  @IsString()
-  interviewerName: string;
-
-  @IsString()
-  sessionTitle: string;
-
-  @IsString()
-  interviewLink: string;
-
-  @IsOptional()
-  @IsString()
-  scheduledAt?: string;
-}
-
-export class SendReportEmailDto {
-  @IsString()
-  to: string;
-
-  @IsString()
-  sessionTitle: string;
-
-  @IsString()
-  reportUrl: string;
-}
-
-export class UploadRecordingArtifactDto {
-  @IsString()
-  fileName: string;
-
-  @IsString()
-  mimeType: string;
-
-  @IsNumber()
-  @Min(1)
-  sizeBytes: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  durationMs?: number;
-
-  @IsOptional()
-  @IsString()
-  source?: 'webcam' | 'screen';
-
-  @IsOptional()
-  @IsString()
-  storageUrl?: string;
-}
-
+export type CreateInterviewDto = z.infer<typeof createInterviewSchema>;
+export type CreateSessionLinkDto = z.infer<typeof createSessionLinkSchema>;
+export type JoinInterviewDto = z.infer<typeof joinInterviewSchema>;
+export type CreateScorecardDto = z.infer<typeof createScorecardSchema>;
+export type ExportInterviewDto = z.infer<typeof exportInterviewSchema>;
+export type UpdateInterviewStatusDto = z.infer<typeof updateInterviewStatusSchema>;
+export type AnalyzeComplexityDto = z.infer<typeof analyzeComplexitySchema>;
+export type ReviewCodeDto = z.infer<typeof reviewCodeSchema>;
+export type SendInviteEmailDto = z.infer<typeof sendInviteEmailSchema>;
+export type SendReportEmailDto = z.infer<typeof sendReportEmailSchema>;
+export type UploadRecordingArtifactDto = z.infer<typeof uploadRecordingArtifactSchema>;
