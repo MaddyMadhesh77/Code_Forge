@@ -1,135 +1,289 @@
-import { Request, Response, NextFunction } from 'express';
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
-// Simple OIDC client scaffold for SSO
-export class OIDCClient {
+import { getConfig, type AppConfig } from "../config/env.js";
+import { BadRequestError, ServiceUnavailableError, UnauthorizedError } from "../common/errors/app-error.js";
+import { logger } from "../common/logging/logger.js";
+import { PrismaService } from "../database/prisma.service.js";
+
+const log = logger.child("EnterpriseAuth");
+
+export type OidcConfig = {
   issuer: string;
   clientId: string;
   clientSecret: string;
   redirectUri: string;
+};
 
-  constructor(issuer: string, clientId: string, clientSecret: string, redirectUri: string) {
-    this.issuer = issuer;
-    this.clientId = clientId;
-    this.clientSecret = clientSecret;
-    this.redirectUri = redirectUri;
+export type AuthorizationRequest = {
+  authUrl: string;
+  state: string;
+  /** PKCE verifier the caller must hold until the callback. */
+  codeVerifier: string;
+  nonce: string;
+};
+
+export type OidcTokens = {
+  accessToken: string;
+  idToken: string;
+  expiresIn: number;
+};
+
+const STATE_TTL_MS = 10 * 60 * 1000;
+const TOKEN_REQUEST_TIMEOUT_MS = 10_000;
+
+function base64url(input: Buffer): string {
+  return input.toString("base64url");
+}
+
+/**
+ * OIDC authorization-code client with PKCE.
+ *
+ * Two things changed from the previous version. It no longer falls back to
+ * literal `'client_id'` / `'client_secret'` defaults — an unconfigured client
+ * refuses to operate rather than shipping placeholder credentials. And
+ * `verifyToken`, which used to accept any Bearer header and attach a
+ * hardcoded `user_123`, is gone entirely; first-party requests are
+ * authenticated by `JwtAuthGuard` against tokens we issued ourselves.
+ */
+export class OIDCClient {
+  /** Pending authorization requests, keyed by a hash of `state`. */
+  private readonly pending = new Map<
+    string,
+    { codeVerifier: string; nonce: string; expiresAt: number }
+  >();
+
+  constructor(private readonly config: OidcConfig | null) {}
+
+  static fromAppConfig(appConfig: AppConfig = getConfig()): OIDCClient {
+    return new OIDCClient(appConfig.oidc.enabled ? appConfig.oidc : null);
   }
 
-  // Generate authorization URL for login
-  getAuthorizationUrl(state: string, nonce: string): string {
+  get enabled(): boolean {
+    return this.config !== null;
+  }
+
+  private requireConfig(): OidcConfig {
+    if (!this.config) {
+      throw new ServiceUnavailableError(
+        "OIDC is not configured. Set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_REDIRECT_URI.",
+        "OIDC_NOT_CONFIGURED",
+      );
+    }
+
+    return this.config;
+  }
+
+  /**
+   * Builds an authorization URL with a CSPRNG `state` and a PKCE challenge.
+   * `state` is retained server-side so the callback can prove the response
+   * belongs to a request we actually made.
+   */
+  createAuthorizationRequest(): AuthorizationRequest {
+    const config = this.requireConfig();
+    this.sweepExpired();
+
+    const state = base64url(randomBytes(32));
+    const nonce = base64url(randomBytes(16));
+    const codeVerifier = base64url(randomBytes(32));
+    const codeChallenge = base64url(createHash("sha256").update(codeVerifier).digest());
+
+    this.pending.set(hashState(state), {
+      codeVerifier,
+      nonce,
+      expiresAt: Date.now() + STATE_TTL_MS,
+    });
+
     const params = new URLSearchParams({
-      client_id: this.clientId,
-      response_type: 'code',
-      scope: 'openid profile email',
-      redirect_uri: this.redirectUri,
+      client_id: config.clientId,
+      response_type: "code",
+      scope: "openid profile email",
+      redirect_uri: config.redirectUri,
       state,
       nonce,
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
     });
-    return `${this.issuer}/authorize?${params.toString()}`;
-  }
 
-  // Exchange authorization code for tokens (requires backend call to issuer)
-  // In production, use @okta/okta-sdk-nodejs, @auth0/auth0-js, or oidc-client-ts
-  async exchangeCodeForToken(code: string): Promise<{ accessToken: string; idToken: string }> {
-    // Placeholder: In production, POST to {issuer}/token
-    // eslint-disable-next-line no-console
-    console.log(`[OIDC] Would exchange code ${code} for token`);
-    return { accessToken: 'placeholder', idToken: 'placeholder' };
-  }
-
-  // Middleware to check JWT token
-  verifyToken() {
-    return (req: Request, res: Response, next: NextFunction) => {
-      try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-          return res.status(401).json({ error: 'unauthorized' });
-        }
-        const token = authHeader.slice(7);
-        // In production, verify JWT signature against issuer's public key
-        // eslint-disable-next-line no-console
-        console.log(`[OIDC] Token verified: ${token.slice(0, 20)}...`);
-        (req as any).user = { sub: 'user_123', email: 'user@example.com' };
-        next();
-      } catch (e) {
-        res.status(401).json({ error: 'unauthorized' });
-      }
+    return {
+      authUrl: `${config.issuer}/authorize?${params.toString()}`,
+      state,
+      codeVerifier,
+      nonce,
     };
+  }
+
+  /**
+   * Exchanges an authorization code for tokens after validating `state`.
+   *
+   * The pending entry is consumed on first use, so a replayed callback fails.
+   */
+  async exchangeCodeForToken(code: string, state: string): Promise<OidcTokens> {
+    const config = this.requireConfig();
+
+    if (typeof code !== "string" || code.length === 0) {
+      throw new BadRequestError("Missing authorization code", undefined, "MISSING_CODE");
+    }
+
+    const key = hashState(state);
+    const entry = this.pending.get(key);
+    this.pending.delete(key);
+
+    if (!entry || entry.expiresAt <= Date.now()) {
+      throw new UnauthorizedError("Invalid or expired state parameter", "INVALID_STATE");
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TOKEN_REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(`${config.issuer}/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: config.redirectUri,
+          client_id: config.clientId,
+          client_secret: config.clientSecret,
+          code_verifier: entry.codeVerifier,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        log.warn("OIDC token exchange rejected", { status: response.status });
+        throw new UnauthorizedError("Token exchange failed", "OIDC_EXCHANGE_FAILED");
+      }
+
+      const body = (await response.json()) as {
+        access_token?: string;
+        id_token?: string;
+        expires_in?: number;
+      };
+
+      if (!body.access_token || !body.id_token) {
+        throw new UnauthorizedError("Token response was incomplete", "OIDC_EXCHANGE_FAILED");
+      }
+
+      return {
+        accessToken: body.access_token,
+        idToken: body.id_token,
+        expiresIn: body.expires_in ?? 3600,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private sweepExpired(): void {
+    const now = Date.now();
+
+    for (const [key, entry] of this.pending) {
+      if (entry.expiresAt <= now) {
+        this.pending.delete(key);
+      }
+    }
   }
 }
 
-// Simple SCIM provider scaffold for group provisioning
+/** States are held hashed so the raw value isn't sitting in process memory. */
+function hashState(state: string): string {
+  return createHash("sha256").update(String(state)).digest("hex");
+}
+
+/**
+ * SCIM 2.0 provisioning backed by the real users table.
+ *
+ * Previously two in-memory Maps, meaning every provisioned identity
+ * disappeared on restart and drifted from the actual user records.
+ */
 export class SCIMProvider {
-  users: Map<string, { id: string; email: string; displayName: string; groups: string[] }> =
-    new Map();
-  groups: Map<string, { id: string; displayName: string; members: string[] }> = new Map();
+  constructor(private readonly prisma: PrismaService) {}
 
-  // POST /scim/Users - create user
-  createUser(data: { email: string; displayName?: string }): { id: string; email: string } {
-    const id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    this.users.set(id, { id, email: data.email, displayName: data.displayName || '', groups: [] });
-    // eslint-disable-next-line no-console
-    console.log(`[SCIM] User created: ${id} (${data.email})`);
-    return { id, email: data.email };
-  }
-
-  // PATCH /scim/Users/:id - update user (e.g., add to group)
-  updateUser(id: string, data: { groups?: string[] }): boolean {
-    const user = this.users.get(id);
-    if (!user) return false;
-    if (data.groups) {
-      user.groups = data.groups;
-      // eslint-disable-next-line no-console
-      console.log(`[SCIM] User ${id} groups updated: ${data.groups.join(', ')}`);
+  async createUser(data: { email: string; displayName?: string }) {
+    if (!data?.email) {
+      throw new BadRequestError("email is required", undefined, "MISSING_EMAIL");
     }
-    return true;
+
+    const email = data.email.trim().toLowerCase();
+
+    // Provisioned accounts get an unusable random password hash; they must
+    // authenticate through the IdP, never with a local password.
+    const user = await this.prisma.user.upsert({
+      where: { email },
+      create: {
+        email,
+        displayName: data.displayName || email,
+        passwordHash: `scim-provisioned:${randomBytes(32).toString("hex")}`,
+      },
+      update: { displayName: data.displayName || undefined, isActive: true },
+      select: { id: true, email: true, displayName: true, isActive: true },
+    });
+
+    log.info("SCIM user provisioned", { userId: user.id });
+    return toScimUser(user);
   }
 
-  // DELETE /scim/Users/:id - delete user
-  deleteUser(id: string): boolean {
-    return this.users.delete(id);
+  async listUsers(filter?: string) {
+    // Minimal SCIM filter support: `userName eq "value"` / `email eq "value"`.
+    const match = filter ? /(?:userName|email)\s+eq\s+"([^"]+)"/i.exec(filter) : null;
+
+    const rows = await this.prisma.user.findMany({
+      where: match ? { email: match[1].toLowerCase() } : {},
+      select: { id: true, email: true, displayName: true, isActive: true },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+
+    return rows.map(toScimUser);
   }
 
-  // GET /scim/Users - list users with filter
-  listUsers(filter?: string): Array<{ id: string; email: string; displayName: string }> {
-    const users = Array.from(this.users.values());
-    if (filter && filter.includes('email')) {
-      const email = filter.split('eq "')[1]?.split('"')[0];
-      return users.filter((u) => u.email === email);
+  async getUser(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, email: true, displayName: true, isActive: true },
+    });
+
+    return user ? toScimUser(user) : null;
+  }
+
+  async updateUser(id: string, data: { active?: boolean; displayName?: string }): Promise<boolean> {
+    const { count } = await this.prisma.user.updateMany({
+      where: { id },
+      data: {
+        ...(data.active !== undefined ? { isActive: data.active } : {}),
+        ...(data.displayName !== undefined ? { displayName: data.displayName } : {}),
+      },
+    });
+
+    return count > 0;
+  }
+
+  /**
+   * SCIM delete is a deprovision: the account is deactivated rather than
+   * removed, so interview history and audit trails survive.
+   */
+  async deleteUser(id: string): Promise<boolean> {
+    const { count } = await this.prisma.user.updateMany({
+      where: { id },
+      data: { isActive: false },
+    });
+
+    if (count > 0) {
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      log.info("SCIM user deprovisioned", { userId: id });
     }
-    return users.map(({ id, email, displayName }) => ({ id, email, displayName }));
+
+    return count > 0;
   }
 
-  // POST /scim/Groups - create group
-  createGroup(data: { displayName: string }): { id: string; displayName: string } {
-    const id = `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    this.groups.set(id, { id, displayName: data.displayName, members: [] });
-    // eslint-disable-next-line no-console
-    console.log(`[SCIM] Group created: ${id} (${data.displayName})`);
-    return { id, displayName: data.displayName };
-  }
-
-  // GET /scim/Groups/:id - get group members
-  getGroup(id: string): { id: string; displayName: string; members: string[] } | null {
-    return this.groups.get(id) || null;
-  }
-
-  // PATCH /scim/Groups/:id - add/remove members
-  updateGroup(id: string, data: { members?: string[] }): boolean {
-    const group = this.groups.get(id);
-    if (!group) return false;
-    if (data.members) {
-      group.members = data.members;
-      // eslint-disable-next-line no-console
-      console.log(`[SCIM] Group ${id} members updated: ${data.members.join(', ')}`);
-    }
-    return true;
-  }
-
-  // GET /scim/ServiceProviderConfig - SCIM 2.0 discovery
   getServiceProviderConfig() {
     return {
-      schemas: ['urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig'],
-      documentationUri: 'https://codeforge.example.com/scim-docs',
+      schemas: ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
+      documentationUri: "https://codeforge.example.com/scim-docs",
       patch: { supported: true },
       bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
       filter: { supported: true, maxResults: 200 },
@@ -138,10 +292,10 @@ export class SCIMProvider {
       etag: { supported: false },
       authenticationSchemes: [
         {
-          name: 'OAuth Bearer Token',
-          description: 'Authentication scheme using the OAuth Bearer Token',
-          specUri: 'http://www.ietf.org/rfc/rfc6750.txt',
-          type: 'oauthbearertoken',
+          name: "OAuth Bearer Token",
+          description: "Authentication scheme using the OAuth Bearer Token",
+          specUri: "http://www.ietf.org/rfc/rfc6750.txt",
+          type: "oauthbearertoken",
           primary: true,
         },
       ],
@@ -149,11 +303,55 @@ export class SCIMProvider {
   }
 }
 
-export const oidcClient = new OIDCClient(
-  process.env.OIDC_ISSUER || 'https://auth.example.com',
-  process.env.OIDC_CLIENT_ID || 'client_id',
-  process.env.OIDC_CLIENT_SECRET || 'client_secret',
-  process.env.OIDC_REDIRECT_URI || 'http://localhost:4000/auth/callback',
-);
+function toScimUser(user: {
+  id: string;
+  email: string;
+  displayName: string;
+  isActive: boolean;
+}) {
+  return {
+    schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+    id: user.id,
+    userName: user.email,
+    displayName: user.displayName,
+    active: user.isActive,
+    emails: [{ value: user.email, primary: true }],
+  };
+}
 
-export const scimProvider = new SCIMProvider();
+/**
+ * Guards the SCIM endpoints with a shared bearer token, compared in constant
+ * time. When `SCIM_BEARER_TOKEN` is unset the endpoints refuse all traffic
+ * rather than defaulting open.
+ */
+export function scimAuth(appConfig: AppConfig = getConfig()) {
+  return (
+    req: { headers: Record<string, unknown> },
+    _res: unknown,
+    next: (err?: Error) => void,
+  ): void => {
+    const expected = appConfig.scim.bearerToken;
+
+    if (!expected) {
+      next(
+        new ServiceUnavailableError(
+          "SCIM is not configured. Set SCIM_BEARER_TOKEN to enable provisioning.",
+          "SCIM_NOT_CONFIGURED",
+        ),
+      );
+      return;
+    }
+
+    const header = req.headers.authorization;
+    const provided = typeof header === "string" ? header.replace(/^Bearer\s+/i, "") : "";
+    const a = Buffer.from(provided);
+    const b = Buffer.from(expected);
+
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      next(new UnauthorizedError("Invalid SCIM credentials", "INVALID_SCIM_TOKEN"));
+      return;
+    }
+
+    next();
+  };
+}
