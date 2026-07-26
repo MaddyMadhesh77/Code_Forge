@@ -3,11 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
+    "@codeforge/sandbox-worker": "workspace:*",
+    "@codeforge/shared": "workspace:*",
+    "@prisma/client": "5",
     "bull": "^4.11.0",
     "express": "^4.18.2",
     "nodemailer": "^6.9.16",
     "prom-client": "^14.0.1",
-    "puppeteer": "^24.7.1"
+    "puppeteer": "^24.7.1",
+    "zod": "^3.24.1"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -15,14 +19,24 @@
     "start": "node dist/index.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prisma:generate": "prisma generate --schema ./prisma/schema.prisma",
-    "prisma:migrate": "prisma migrate dev --schema ./prisma/schema.prisma"
+    "prisma:migrate": "prisma migrate dev --schema ./prisma/schema.prisma",
+    "prisma:deploy": "prisma migrate deploy --schema ./prisma/schema.prisma",
+    "prisma:seed": "tsx prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "devDependencies": {
-    "@prisma/client": "5",
     "@types/express": "^4.17.21",
     "@types/node": "^25.6.0",
+    "@types/supertest": "^6.0.2",
     "prisma": "5",
-    "tsx": "^4.7.0"
+    "supertest": "^7.0.0",
+    "tsx": "^4.7.0",
+    "vitest": "^4.1.7",
+    "@types/nodemailer": "^6.4.17"
   }
 }
