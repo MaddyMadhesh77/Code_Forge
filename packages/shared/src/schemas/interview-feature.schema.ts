@@ -149,109 +149,37 @@ export const billingSummarySchema = z.object({
   updatedAt: z.string(),
 });
 
-export const debugAnnotationSchema = z.object({
-  id: z.string(),
-  sessionId: z.string(),
-  authorId: z.string(),
-  authorName: z.string(),
-  message: z.string(),
-  anchor: z
-    .object({
-      filePath: z.string().optional(),
-      line: z.number().optional(),
-      column: z.number().optional(),
-    })
-    .nullable(),
-  createdAt: z.string(),
-});
+/**
+ * Debug sessions, skill graphs, evidence trails, benchmarks and quality
+ * analytics are owned by `interview.schema.ts`. They are re-exported here so
+ * this module's public surface is unchanged, without a second definition that
+ * can drift from the first.
+ */
+export {
+  debugAnnotationSchema,
+  debugExecutionSchema,
+  debugSessionSchema,
+  skillNodeSchema,
+  skillGraphSchema,
+  evidenceTrailItemSchema,
+  evidenceTrailSchema,
+  benchmarkSummarySchema,
+  interviewerBiasSignalSchema,
+  qualityAnalyticsSchema,
+} from './interview.schema.js';
 
-export const debugExecutionSchema = z.object({
-  id: z.string(),
-  sessionId: z.string(),
-  executedById: z.string(),
-  executedByName: z.string(),
-  code: z.string(),
-  language: z.string(),
-  result: z.object({
-    verdict: z.string(),
-    stdout: z.string(),
-    stderr: z.string(),
-  }),
-  annotations: z.array(z.string()),
-  createdAt: z.string(),
-});
-
-export const debugSessionSchema = z.object({
-  sessionId: z.string(),
-  status: z.enum(['ACTIVE', 'ENDED']),
-  participants: z.array(z.string()),
-  executions: z.array(debugExecutionSchema),
-  annotations: z.array(debugAnnotationSchema),
-  startedAt: z.string(),
-  updatedAt: z.string(),
-});
-
-export const skillNodeSchema = z.object({
-  round: z.number(),
-  sessionId: z.string(),
-  role: z.string(),
-  level: z.string(),
-  score: z.number(),
-  difficulty: z.number(),
-  createdAt: z.string(),
-});
-
-export const skillGraphSchema = z.object({
-  candidateId: z.string(),
-  candidateName: z.string().optional(),
-  criteriaAverages: z.record(z.number()),
-  overallTrajectory: z.array(skillNodeSchema),
-  improvementTrend: z.number(),
-});
-
-export const evidenceTrailItemSchema = z.object({
-  id: z.string(),
-  category: z.enum(['POSITIVE', 'NEGATIVE', 'NEUTRAL']),
-  label: z.string(),
-  evidence: z.string(),
-  source: z.string(),
-  weight: z.number(),
-});
-
-export const evidenceTrailSchema = z.object({
-  sessionId: z.string(),
-  candidateId: z.string(),
-  recommendation: z.enum(['HIRE', 'NO_HIRE', 'REVIEW']),
-  summary: z.string(),
-  items: z.array(evidenceTrailItemSchema),
-  generatedAt: z.string(),
-});
-
-export const benchmarkSummarySchema = z.object({
-  role: z.string(),
-  level: z.string(),
-  sampleSize: z.number(),
-  averageScore: z.number(),
-  candidatePercentile: z.number().optional(),
-  difficultyAverage: z.number(),
-  notes: z.array(z.string()),
-});
-
-export const interviewerBiasSignalSchema = z.object({
-  interviewerId: z.string(),
-  interviewerName: z.string(),
-  biasType: z.enum(['LENIENT', 'STRICT', 'HIGH_VARIANCE']),
-  signalScore: z.number(),
-  evidence: z.string(),
-});
-
-export const qualityAnalyticsSchema = z.object({
-  rangeDays: z.number(),
-  questionDifficultyDrift: z.number(),
-  falseNegativeSignals: z.array(z.string()),
-  interviewerBiasSignals: z.array(interviewerBiasSignalSchema),
-  notes: z.array(z.string()),
-});
+export type {
+  DebugAnnotation,
+  DebugExecution,
+  DebugSession,
+  SkillNode,
+  SkillGraph,
+  EvidenceTrailItem,
+  EvidenceTrail,
+  BenchmarkSummary,
+  InterviewerBiasSignal,
+  QualityAnalytics,
+} from './interview.schema.js';
 
 export type ComplexityAnalysis = z.infer<typeof complexityAnalysisSchema>;
 export type CodeReviewIssue = z.infer<typeof codeReviewIssueSchema>;
@@ -268,10 +196,3 @@ export type IntegrationProvider = z.infer<typeof integrationProviderSchema>;
 export type IntegrationConnection = z.infer<typeof integrationConnectionSchema>;
 export type BillingPlan = z.infer<typeof billingPlanSchema>;
 export type BillingSummary = z.infer<typeof billingSummarySchema>;
-export type DebugAnnotation = z.infer<typeof debugAnnotationSchema>;
-export type DebugExecution = z.infer<typeof debugExecutionSchema>;
-export type DebugSession = z.infer<typeof debugSessionSchema>;
-export type SkillGraph = z.infer<typeof skillGraphSchema>;
-export type EvidenceTrail = z.infer<typeof evidenceTrailSchema>;
-export type BenchmarkSummary = z.infer<typeof benchmarkSummarySchema>;
-export type QualityAnalytics = z.infer<typeof qualityAnalyticsSchema>;
