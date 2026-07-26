@@ -4,7 +4,7 @@ import type {
   BillingPlan,
   BillingSummary,
   CalibrationDashboard,
-  CandidateSkillGraph,
+  SkillGraph as CandidateSkillGraph,
   DebugAnnotation,
   DebugExecution,
   DebugSession,
@@ -71,6 +71,8 @@ type CandidateRoundRecord = {
   criteriaScores: Record<string, number>;
   interviewerId: string;
   interviewerName: string;
+  /** The interviewer's holistic rating, when they supplied one. */
+  overallRating?: number | null;
   createdAt: string;
 };
 
@@ -259,7 +261,7 @@ export class InterviewProductService {
       rubricNotes: input.rubricNotes ?? [],
       isPrivate: input.isPrivate ?? true,
       createdBy: input.createdBy,
-      level: input.level ?? null,
+      level: input.level ?? undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -356,6 +358,7 @@ export class InterviewProductService {
       criteriaScores: entry.scores,
       interviewerId: entry.interviewerId,
       interviewerName: entry.interviewerName,
+      overallRating: entry.overallRating ?? null,
       createdAt,
     });
   }
@@ -719,12 +722,12 @@ export class InterviewProductService {
       });
     }
 
-    if (recording?.codeSnapshots?.length) {
+    if (recording?.snapshotCount) {
       items.push({
         id: makeId('evidence'),
         category: 'POSITIVE',
         label: 'Code progression',
-        evidence: `Captured ${recording.codeSnapshots.length} code snapshots during the session.`,
+        evidence: `Captured ${recording.snapshotCount} code snapshots during the session.`,
         source: 'recording',
         weight: 2,
       });

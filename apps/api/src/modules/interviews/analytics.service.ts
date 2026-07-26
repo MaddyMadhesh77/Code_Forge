@@ -1,7 +1,7 @@
 
 import { PrismaService } from '../../database/prisma.service.js';
 
-interface DailyTrendPoint {
+export interface DailyTrendPoint {
   date: string;
   sessions: number;
   submissions: number;
