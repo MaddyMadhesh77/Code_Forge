@@ -1,31 +1,20 @@
-import {
-  WebSocketGateway,
-  WebSocketServer,
-  SubscribeMessage,
-  OnGatewayConnection,
-  OnGatewayDisconnect,
-  MessageBody,
-  ConnectedSocket,
-} from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
-import { Server, Socket } from 'socket.io';
+import { logger } from '../../common/logging/logger.js';
+import type { Server, Socket } from './gateway.types.js';
 
 import { RecordingService } from './recording.service.js';
 import { AntiCheatService } from './anti-cheat.service.js';
 import { InterviewProductService } from './interview-product.service.js';
 import { InterviewEvent, AntiCheatEventType } from '@codeforge/shared';
+import { WsAuthGuard, type SocketLike } from '../../common/guards/ws-auth.guard.js';
 
-@WebSocketGateway({
-  namespace: '/interviews',
-  cors: { origin: '*' },
-})
-
-export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  @WebSocketServer() server: Server;
-  private logger = new Logger('InterviewsGateway');
+export class InterviewsGateway {
+  server!: Server;
+  private readonly logger = logger.child('InterviewsGateway');
   private sessionConnections = new Map<string, Set<string>>();
   private socketToSessionUser = new Map<string, { sessionId: string; userId: string }>();
   private sessionUserSockets = new Map<string, Map<string, Set<string>>>();
+
+  private readonly wsAuthGuard = new WsAuthGuard();
 
   constructor(
     private recordingService: RecordingService,
@@ -33,12 +22,42 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
     private interviewProductService: InterviewProductService,
   ) {}
 
+  /**
+   * Authenticates the handshake before the socket may send anything.
+   * Sockets bypass the HTTP middleware chain, so without this the realtime
+   * channel is unauthenticated regardless of how well the REST API is guarded.
+   */
   async handleConnection(client: Socket) {
-    this.logger.log(`Client connected: ${client.id}`);
+    const user = this.wsAuthGuard.authenticate(client as unknown as SocketLike);
+
+    if (!user) {
+      this.logger.warn(`Rejecting unauthenticated socket ${client.id}`);
+      (client as unknown as { disconnect?: (close?: boolean) => void }).disconnect?.(true);
+      return;
+    }
+
+    (client as unknown as { data?: Record<string, unknown> }).data = {
+      ...((client as unknown as { data?: Record<string, unknown> }).data ?? {}),
+      user,
+    };
+
+    this.logger.info(`Client connected: ${client.id}`);
+  }
+
+  /**
+   * The authenticated principal for a socket.
+   *
+   * Every handler resolves the actor through this rather than reading a
+   * `userId` out of the message body — a client-supplied id let any socket
+   * act as any user.
+   */
+  private actorId(client: Socket): string | null {
+    const user = WsAuthGuard.currentUser(client as unknown as SocketLike);
+    return user?.id ?? null;
   }
 
   async handleDisconnect(client: Socket) {
-    this.logger.log(`Client disconnected: ${client.id}`);
+    this.logger.info(`Client disconnected: ${client.id}`);
     
     const membership = this.socketToSessionUser.get(client.id);
     if (!membership) {
@@ -61,14 +80,18 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
     this.socketToSessionUser.delete(client.id);
     this.server.to(sessionId).emit('participant-left', { clientId: client.id, userId, timestamp: Date.now() });
   }
-
-  @SubscribeMessage('join-room')
   async handleJoinRoom(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; userId: string; role: string },
+    client: Socket,
+    data: { sessionId: string; role: string },
   ) {
-    const { sessionId, userId, role } = data;
-    
+    const userId = this.actorId(client);
+
+    if (!userId) {
+      return { success: false, reason: 'UNAUTHENTICATED' };
+    }
+
+    const { sessionId, role } = data;
+
     client.join(sessionId);
     
     if (!this.sessionConnections.has(sessionId)) {
@@ -89,21 +112,24 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     this.server.to(sessionId).emit('participant-joined', {
       userId,
-      displayName: data.userId,
       role,
       timestamp: Date.now(),
     });
 
     return { success: true };
   }
-
-  @SubscribeMessage('chat_message')
   async handleChatMessage(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; userId: string; displayName: string; message: string },
+    client: Socket,
+    data: { sessionId: string; displayName: string; message: string },
   ) {
+    const userId = this.actorId(client);
+
+    if (!userId) {
+      return { success: false, reason: 'UNAUTHENTICATED' };
+    }
+
     const payload = {
-      userId: data.userId,
+      userId,
       displayName: data.displayName,
       message: data.message,
       timestamp: Date.now(),
@@ -112,25 +138,27 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
     await this.recordingService.addEvent(data.sessionId, { type: 'chat-message', ...payload } as any);
     return { success: true };
   }
-
-  @SubscribeMessage('run_request')
   async handleRunRequest(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; userId: string; language: string; runId?: string },
+    client: Socket,
+    data: { sessionId: string; language: string; runId?: string },
   ) {
+    const userId = this.actorId(client);
+
+    if (!userId) {
+      return { success: false, reason: 'UNAUTHENTICATED' };
+    }
+
     client.to(data.sessionId).emit('run_request', {
-      userId: data.userId,
+      userId,
       language: data.language,
       runId: data.runId,
       timestamp: Date.now(),
     });
     return { success: true };
   }
-
-  @SubscribeMessage('run_result')
   async handleRunResult(
-    @ConnectedSocket() _client: Socket,
-    @MessageBody() data: { sessionId: string; runId: string; status: string; tests?: any[] },
+    _client: Socket,
+    data: { sessionId: string; runId: string; status: string; tests?: any[] },
   ) {
     this.server.to(data.sessionId).emit('run_result', {
       runId: data.runId,
@@ -140,38 +168,52 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
     });
     return { success: true };
   }
-
-  @SubscribeMessage('notes_update')
   async handleNotesUpdate(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; userId: string; note: string },
+    client: Socket,
+    data: { sessionId: string; note: string },
   ) {
+    const userId = this.actorId(client);
+
+    if (!userId) {
+      return { success: false, reason: 'UNAUTHENTICATED' };
+    }
+
     client.to(data.sessionId).emit('notes_update', {
-      userId: data.userId,
+      userId,
       note: data.note,
       timestamp: Date.now(),
     });
     return { success: true };
   }
-
-  @SubscribeMessage('rating_submit')
   async handleRatingSubmit(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; userId: string; scores: Record<string, number> },
+    client: Socket,
+    data: { sessionId: string; scores: Record<string, number> },
   ) {
+    const userId = this.actorId(client);
+
+    if (!userId) {
+      return { success: false, reason: 'UNAUTHENTICATED' };
+    }
+
     client.to(data.sessionId).emit('rating_submit', {
-      userId: data.userId,
+      userId,
       scores: data.scores,
       timestamp: Date.now(),
     });
     return { success: true };
   }
-
-  @SubscribeMessage('webrtc_offer')
   async handleWebRtcOffer(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; targetUserId: string; fromUserId: string; offer: Record<string, unknown> },
+    client: Socket,
+    data: { sessionId: string; targetUserId: string; offer: Record<string, unknown> },
   ) {
+    // The sender identity comes from the verified handshake; accepting a
+    // client-supplied `fromUserId` allowed peer impersonation.
+    const fromUserId = this.actorId(client);
+
+    if (!fromUserId) {
+      return { success: false, reason: 'UNAUTHENTICATED' };
+    }
+
     const targetSockets = this.sessionUserSockets.get(data.sessionId)?.get(data.targetUserId);
     if (!targetSockets || targetSockets.size === 0) {
       return { success: false, reason: 'TARGET_NOT_CONNECTED' };
@@ -180,7 +222,7 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
     targetSockets.forEach((socketId) => {
       this.server.to(socketId).emit('webrtc_offer', {
         sessionId: data.sessionId,
-        fromUserId: data.fromUserId,
+        fromUserId,
         offer: data.offer,
         timestamp: Date.now(),
       });
@@ -188,12 +230,18 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     return { success: true };
   }
-
-  @SubscribeMessage('webrtc_answer')
   async handleWebRtcAnswer(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; targetUserId: string; fromUserId: string; answer: Record<string, unknown> },
+    client: Socket,
+    data: { sessionId: string; targetUserId: string; answer: Record<string, unknown> },
   ) {
+    // The sender identity comes from the verified handshake; accepting a
+    // client-supplied `fromUserId` allowed peer impersonation.
+    const fromUserId = this.actorId(client);
+
+    if (!fromUserId) {
+      return { success: false, reason: 'UNAUTHENTICATED' };
+    }
+
     const targetSockets = this.sessionUserSockets.get(data.sessionId)?.get(data.targetUserId);
     if (!targetSockets || targetSockets.size === 0) {
       return { success: false, reason: 'TARGET_NOT_CONNECTED' };
@@ -202,7 +250,7 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
     targetSockets.forEach((socketId) => {
       this.server.to(socketId).emit('webrtc_answer', {
         sessionId: data.sessionId,
-        fromUserId: data.fromUserId,
+        fromUserId,
         answer: data.answer,
         timestamp: Date.now(),
       });
@@ -210,12 +258,18 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     return { success: true };
   }
-
-  @SubscribeMessage('webrtc_ice_candidate')
   async handleWebRtcIceCandidate(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; targetUserId: string; fromUserId: string; candidate: Record<string, unknown> },
+    client: Socket,
+    data: { sessionId: string; targetUserId: string; candidate: Record<string, unknown> },
   ) {
+    // The sender identity comes from the verified handshake; accepting a
+    // client-supplied `fromUserId` allowed peer impersonation.
+    const fromUserId = this.actorId(client);
+
+    if (!fromUserId) {
+      return { success: false, reason: 'UNAUTHENTICATED' };
+    }
+
     const targetSockets = this.sessionUserSockets.get(data.sessionId)?.get(data.targetUserId);
     if (!targetSockets || targetSockets.size === 0) {
       return { success: false, reason: 'TARGET_NOT_CONNECTED' };
@@ -224,7 +278,7 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
     targetSockets.forEach((socketId) => {
       this.server.to(socketId).emit('webrtc_ice_candidate', {
         sessionId: data.sessionId,
-        fromUserId: data.fromUserId,
+        fromUserId,
         candidate: data.candidate,
         timestamp: Date.now(),
       });
@@ -232,11 +286,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     return { success: true };
   }
-
-  @SubscribeMessage('code-change')
   async handleCodeChange(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; code: string; language: string },
+    client: Socket,
+    data: { sessionId: string; code: string; language: string },
   ) {
     const { sessionId, code, language } = data;
 
@@ -265,11 +317,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     return { success: true };
   }
-
-  @SubscribeMessage('debug-start')
   async handleDebugStart(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; participants: string[] },
+    client: Socket,
+    data: { sessionId: string; participants: string[] },
   ) {
     const session = this.interviewProductService.startDebugSession(data.sessionId, data.participants ?? []);
     client.to(data.sessionId).emit('debug-session-started', {
@@ -280,11 +330,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
     });
     return { success: true, session };
   }
-
-  @SubscribeMessage('debug-execute')
   async handleDebugExecute(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: {
+    client: Socket,
+    data: {
       sessionId: string;
       executedById: string;
       executedByName: string;
@@ -302,11 +350,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
     client.to(data.sessionId).emit('debug-execution', execution);
     return { success: true, execution };
   }
-
-  @SubscribeMessage('debug-annotate')
   async handleDebugAnnotate(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: {
+    client: Socket,
+    data: {
       sessionId: string;
       authorId: string;
       authorName: string;
@@ -323,11 +369,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
     client.to(data.sessionId).emit('debug-annotation', annotation);
     return { success: true, annotation };
   }
-
-  @SubscribeMessage('verdict-update')
   async handleVerdictUpdate(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: {
+    client: Socket,
+    data: {
       sessionId: string;
       submissionId: string;
       verdict: string;
@@ -356,11 +400,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     return { success: true };
   }
-
-  @SubscribeMessage('cursor-position')
   async handleCursorPosition(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: {
+    client: Socket,
+    data: {
       sessionId: string;
       userId: string;
       line: number;
@@ -390,11 +432,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     return { success: true };
   }
-
-  @SubscribeMessage('tab-switch')
   async handleTabSwitch(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; participantId: string },
+    client: Socket,
+    data: { sessionId: string; participantId: string },
   ) {
     const { sessionId, participantId } = data;
 
@@ -416,11 +456,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     return { success: true };
   }
-
-  @SubscribeMessage('copy-attempt')
   async handleCopyAttempt(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; participantId: string },
+    client: Socket,
+    data: { sessionId: string; participantId: string },
   ) {
     const { sessionId, participantId } = data;
 
@@ -442,11 +480,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     return { success: true };
   }
-
-  @SubscribeMessage('paste-attempt')
   async handlePasteAttempt(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; participantId: string },
+    client: Socket,
+    data: { sessionId: string; participantId: string },
   ) {
     const { sessionId, participantId } = data;
 
@@ -468,11 +504,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     return { success: true };
   }
-
-  @SubscribeMessage('window-blur')
   async handleWindowBlur(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; participantId: string },
+    client: Socket,
+    data: { sessionId: string; participantId: string },
   ) {
     const { sessionId, participantId } = data;
 
@@ -494,11 +528,9 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
 
     return { success: true };
   }
-
-  @SubscribeMessage('timeline-update')
   async handleTimelineUpdate(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { sessionId: string; event: any },
+    client: Socket,
+    data: { sessionId: string; event: any },
   ) {
     const { sessionId, event } = data;
 
@@ -520,5 +552,64 @@ export class InterviewsGateway implements OnGatewayConnection, OnGatewayDisconne
   sendToUser(sessionId: string, userId: string, event: string, data: any) {
     this.server.to(sessionId).emit(`${event}:${userId}`, data);
   }
-}
 
+  /**
+   * Attaches this gateway to a Socket.IO-compatible server.
+   *
+   * The class previously carried NestJS decorators from a package that was
+   * never installed — importing it threw at runtime, so the gateway could not
+   * actually run. Registration is now explicit and framework-agnostic.
+   */
+  register(server: Server): void {
+    this.server = server;
+
+    server.on('connection', (socket: Socket) => {
+      void this.handleConnection(socket);
+
+      const handlers: Array<[string, (payload: unknown) => unknown]> = [
+      ['join-room', (payload: unknown) => this.handleJoinRoom(socket, payload as never)],
+      ['chat_message', (payload: unknown) => this.handleChatMessage(socket, payload as never)],
+      ['run_request', (payload: unknown) => this.handleRunRequest(socket, payload as never)],
+      ['run_result', (payload: unknown) => this.handleRunResult(socket, payload as never)],
+      ['notes_update', (payload: unknown) => this.handleNotesUpdate(socket, payload as never)],
+      ['rating_submit', (payload: unknown) => this.handleRatingSubmit(socket, payload as never)],
+      ['webrtc_offer', (payload: unknown) => this.handleWebRtcOffer(socket, payload as never)],
+      ['webrtc_answer', (payload: unknown) => this.handleWebRtcAnswer(socket, payload as never)],
+      ['webrtc_ice_candidate', (payload: unknown) => this.handleWebRtcIceCandidate(socket, payload as never)],
+      ['code-change', (payload: unknown) => this.handleCodeChange(socket, payload as never)],
+      ['debug-start', (payload: unknown) => this.handleDebugStart(socket, payload as never)],
+      ['debug-execute', (payload: unknown) => this.handleDebugExecute(socket, payload as never)],
+      ['debug-annotate', (payload: unknown) => this.handleDebugAnnotate(socket, payload as never)],
+      ['verdict-update', (payload: unknown) => this.handleVerdictUpdate(socket, payload as never)],
+      ['cursor-position', (payload: unknown) => this.handleCursorPosition(socket, payload as never)],
+      ['tab-switch', (payload: unknown) => this.handleTabSwitch(socket, payload as never)],
+      ['copy-attempt', (payload: unknown) => this.handleCopyAttempt(socket, payload as never)],
+      ['paste-attempt', (payload: unknown) => this.handlePasteAttempt(socket, payload as never)],
+      ['window-blur', (payload: unknown) => this.handleWindowBlur(socket, payload as never)],
+      ['timeline-update', (payload: unknown) => this.handleTimelineUpdate(socket, payload as never)],
+      ];
+
+      for (const [event, handler] of handlers) {
+        socket.on(event, (payload: unknown) => {
+          try {
+            const outcome = handler(payload);
+
+            // Handlers are async; a rejection must be logged, not left as an
+            // unhandled rejection that takes down the process.
+            if (outcome instanceof Promise) {
+              outcome.catch((err) => this.logger.error('Socket handler failed', { event, err }));
+            }
+          } catch (err) {
+            this.logger.error('Socket handler threw', { event, err });
+          }
+        });
+      }
+
+      socket.on('disconnect', () => {
+        void this.handleDisconnect(socket);
+      });
+    });
+
+    this.logger.info('Interview gateway registered', { events: 20 });
+  }
+}
