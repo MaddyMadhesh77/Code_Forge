@@ -1,7 +1,7 @@
 import { AuthService } from "./auth.service.js";
 
 export class AuthController {
-  constructor(private readonly authService = new AuthService()) {}
+  constructor(private readonly authService: AuthService) {}
 
   register(body: unknown) {
     return this.authService.register(body);
@@ -11,11 +11,11 @@ export class AuthController {
     return this.authService.login(body);
   }
 
-  refresh(refreshToken: string) {
+  refresh(refreshToken: unknown) {
     return this.authService.refresh(refreshToken);
   }
 
-  revoke(refreshToken: string) {
+  revoke(refreshToken: unknown) {
     return this.authService.revoke(refreshToken);
   }
 
@@ -23,4 +23,3 @@ export class AuthController {
     return this.authService.me(userId);
   }
 }
-
