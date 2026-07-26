@@ -1,6 +1,6 @@
-import type { QueuedSubmission, SubmitCodeInput } from "../../../../../packages/shared/src/schemas/execution.schema.js";
-import type { ExecutionQueueJob } from "../../../../../packages/shared/src/schemas/queue.schema.js";
-import { executionBus } from "../../../../../packages/shared/src/runtime/execution-bus.js";
+import type { QueuedSubmission, SubmitCodeInput } from "@codeforge/shared";
+import type { ExecutionQueueJob } from "@codeforge/shared";
+import { executionBus } from "@codeforge/shared";
 
 export interface ExecutionQueuePort {
   enqueue(input: SubmitCodeInput): QueuedSubmission;
