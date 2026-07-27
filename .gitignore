@@ -9,3 +9,14 @@ dist/
 coverage/
 
 *.tsbuildinfo
+
+# Local-only project notes/reports — kept on disk, not tracked in git
+/COMMIT_HISTORY.md
+/ENTERPRISE_CHECKLIST.md
+/ENTERPRISE_FEATURES.md
+/FINAL_IMPLEMENTATION_REPORT.md
+/IMPLEMENTATION_SUMMARY.md
+/INTERVIEW_API_REFERENCE.md
+/INTERVIEW_SYSTEM.md
+/QUICKSTART_ENTERPRISE.md
+/SANDBOX_HARDENING.md

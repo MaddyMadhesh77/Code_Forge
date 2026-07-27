@@ -35,3 +35,7 @@ Theme tokens live in `src/styles/theme.css` and are mirrored in `src/tokens` for
 - `src/providers/SocketProvider.tsx` is a placeholder around `socket.io-client` for interview realtime wiring.
 - `src/hooks/useProblems.ts` and `src/hooks/useDashboardOverview.ts` use React Query.
 - The shared API client lives in `src/services/api.ts` and falls back to mock data in dev when an endpoint is missing.
+
+## Theming
+
+Every page should style itself from the CSS variables in `src/styles/theme.css` (via `bg-[color:var(--bg-surface)]`-style Tailwind arbitrary values, or the `Card`/`Badge` components), never hardcoded Tailwind colors like `bg-white/5` or `text-white`. `Reports`, `Users`, `Queue`, and `Settings` were previously built with a fixed dark-glass look that ignored the light/dark toggle; they've been converted to the token-based system so the whole app now switches themes consistently. The `/problems` and `/sessions` route wrappers also no longer duplicate the page-level heading — the wrapper only owns tab navigation now.
