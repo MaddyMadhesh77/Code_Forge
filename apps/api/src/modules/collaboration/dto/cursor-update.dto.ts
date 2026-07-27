@@ -3,3 +3,4 @@ export type CursorUpdateDto = {
   userId: string;
   cursor: number;
 };
+

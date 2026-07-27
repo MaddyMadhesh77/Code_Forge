@@ -1,0 +1,27 @@
+{
+  "name": "@codeforge/sandbox-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/worker.module.js",
+  "types": "./dist/worker.module.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/worker.module.d.ts",
+      "import": "./dist/worker.module.js",
+      "default": "./dist/worker.module.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@codeforge/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^5.7.3"
+  }
+}

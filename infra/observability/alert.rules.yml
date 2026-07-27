@@ -1,0 +1,29 @@
+groups:
+  - name: codeforge.rules
+    rules:
+      - alert: HighDLQJobs
+        expr: sum(codeforge_queue_dlq_jobs_total) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of jobs in DLQ ({{ $value }})"
+          description: "There are more than 10 jobs in the Dead Letter Queue. Investigate worker failures and job payloads."
+
+      - alert: HighErrorRate
+        expr: increase(http_request_errors_total[5m]) / increase(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP error rate"
+          description: "More than 5% of requests are failing over the last 5 minutes."
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p95 request latency"
+          description: "P95 request latency is above 1s."

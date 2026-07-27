@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": false,
+    "composite": true,
+    "declaration": true,
+    "sourceMap": true,
+    "ignoreDeprecations": "5.0",
+    // The websocket gateway uses parameter decorators.
+    "experimentalDecorators": true,
+    "strictPropertyInitialization": false,
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  // @codeforge/shared is consumed through its build output rather than a path
+  // alias into its sources, so `rootDir` stays honest and each package
+  // compiles independently.
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../sandbox-worker" }
+  ],
+  "include": ["src"]
+}

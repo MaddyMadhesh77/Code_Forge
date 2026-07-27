@@ -1,0 +1,17 @@
+.container {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.particle {
+  position: absolute;
+  font-family: var(--font-mono);
+  color: var(--accent-primary);
+  opacity: 0;
+  user-select: none;
+  will-change: transform, opacity;
+  filter: blur(0.3px);
+}

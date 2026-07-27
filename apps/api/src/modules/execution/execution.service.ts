@@ -2,9 +2,9 @@ import {
   submitCodeSchema,
   type QueuedSubmission,
   type SubmitCodeInput,
-} from "../../../../../packages/shared/src/schemas/execution.schema.js";
-import type { ExecutionQueueJob, ExecutionResultEvent } from "../../../../../packages/shared/src/schemas/queue.schema.js";
-import { executionBus } from "../../../../../packages/shared/src/runtime/execution-bus.js";
+} from "@codeforge/shared";
+import type { ExecutionQueueJob, ExecutionResultEvent } from "@codeforge/shared";
+import { executionBus } from "@codeforge/shared";
 import {
   InMemoryExecutionQueue,
   type ExecutionQueuePort,
@@ -59,3 +59,4 @@ export class ExecutionService {
     return this.resultStore.getSubmissionSession(submissionId);
   }
 }
+

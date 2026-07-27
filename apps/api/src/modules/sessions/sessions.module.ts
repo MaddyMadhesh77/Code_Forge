@@ -1,7 +1,13 @@
-import { SessionsController } from "./sessions.controller.js";
+import { SessionsRepository } from "./sessions.repository.js";
 import { SessionsService } from "./sessions.service.js";
+import { PrismaService } from "../../database/prisma.service.js";
 
 export class SessionsModule {
-  controller = new SessionsController(new SessionsService());
-  service = new SessionsService();
+  readonly repository: SessionsRepository;
+  readonly service: SessionsService;
+
+  constructor(prisma: PrismaService) {
+    this.repository = new SessionsRepository(prisma);
+    this.service = new SessionsService(this.repository);
+  }
 }

@@ -1,1 +1,0 @@
-Feature: Configure module - Step 1

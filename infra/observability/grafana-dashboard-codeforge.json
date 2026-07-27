@@ -1,0 +1,31 @@
+{
+  "annotations": {"list":[]},
+  "panels": [
+    {
+      "type": "graph",
+      "title": "DLQ Jobs",
+      "id": 1,
+      "targets": [
+        { "expr": "sum(codeforge_queue_dlq_jobs_total)", "refId": "A" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "HTTP Error Rate (5m)",
+      "id": 2,
+      "targets": [
+        { "expr": "increase(http_request_errors_total[5m]) / increase(http_requests_total[5m])", "refId": "A" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "P95 Latency",
+      "id": 3,
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "refId": "A" }
+      ]
+    }
+  ],
+  "title": "Code Forge Overview",
+  "schemaVersion": 16
+}

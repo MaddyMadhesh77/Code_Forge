@@ -1,7 +1,13 @@
-import { ProblemsController } from "./problems.controller.js";
+import { ProblemsRepository } from "./problems.repository.js";
 import { ProblemsService } from "./problems.service.js";
+import { PrismaService } from "../../database/prisma.service.js";
 
 export class ProblemsModule {
-	controller = new ProblemsController(new ProblemsService());
-	service = new ProblemsService();
+  readonly repository: ProblemsRepository;
+  readonly service: ProblemsService;
+
+  constructor(prisma: PrismaService) {
+    this.repository = new ProblemsRepository(prisma);
+    this.service = new ProblemsService(this.repository);
+  }
 }

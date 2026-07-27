@@ -1,4 +1,4 @@
-import type { ExecutionResult } from "../../../../../packages/shared/src/schemas/execution.schema.js";
+import type { ExecutionResult } from "@codeforge/shared";
 
 export class ExecutionResultStore {
   private readonly resultsBySubmission = new Map<string, ExecutionResult>();
@@ -29,3 +29,4 @@ export class ExecutionResultStore {
     return this.submissionSession.get(submissionId) ?? null;
   }
 }
+

@@ -1,0 +1,71 @@
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { assertValidTenantId, isValidTenantId, resolveAuditLogPath } from "./audit-paths.js";
+import { BadRequestError } from "../common/errors/app-error.js";
+
+const BASE = "/var/data/audit";
+
+describe("audit log path resolution", () => {
+  it("resolves a valid tenant inside the audit directory", () => {
+    expect(resolveAuditLogPath(BASE, "acme-corp")).toBe(path.join(BASE, "acme-corp.log"));
+    expect(resolveAuditLogPath(BASE, "tenant_1")).toBe(path.join(BASE, "tenant_1.log"));
+  });
+
+  it("rejects the traversal payload from the original report", () => {
+    // GET /operator/audit/../../etc/passwd previously read arbitrary files.
+    expect(() => resolveAuditLogPath(BASE, "../../etc/passwd")).toThrow(BadRequestError);
+  });
+
+  it("rejects every traversal and absolute-path variant", () => {
+    const payloads = [
+      "..",
+      "../",
+      "../../etc/passwd",
+      "..%2f..%2fetc%2fpasswd",
+      "%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+      "....//....//etc/passwd",
+      "/etc/passwd",
+      "/absolute",
+      "a/../../b",
+      "foo/bar",
+      "foo\\bar",
+      "..\\..\\windows\\system32",
+      "tenant .log",
+      ".hidden",
+      "-leading-dash",
+      "",
+      " ",
+      "a".repeat(65),
+    ];
+
+    for (const payload of payloads) {
+      expect(() => resolveAuditLogPath(BASE, payload), `expected rejection for ${payload}`).toThrow(
+        BadRequestError,
+      );
+    }
+  });
+
+  it("rejects non-string tenants", () => {
+    for (const value of [null, undefined, 42, {}, []]) {
+      expect(() => assertValidTenantId(value)).toThrow(BadRequestError);
+    }
+  });
+
+  it("classifies tenant ids consistently", () => {
+    expect(isValidTenantId("acme")).toBe(true);
+    expect(isValidTenantId("Acme-1_2")).toBe(true);
+    expect(isValidTenantId("../etc")).toBe(false);
+    expect(isValidTenantId("_leading-underscore")).toBe(false);
+  });
+
+  it("never escapes the base directory for any accepted input", () => {
+    const root = path.resolve(BASE);
+
+    for (const tenant of ["a", "tenant-9", "A_B-c", "x".repeat(64)]) {
+      const resolved = resolveAuditLogPath(BASE, tenant);
+      expect(resolved.startsWith(root + path.sep)).toBe(true);
+      expect(path.dirname(resolved)).toBe(root);
+    }
+  });
+});

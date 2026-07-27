@@ -5,4 +5,8 @@ export * from "./schemas/execution.schema.js";
 export * from "./schemas/problem.schema.js";
 export * from "./schemas/queue.schema.js";
 export * from "./schemas/session.schema.js";
+export * from "./schemas/interview.schema.js";
+export * from "./schemas/interview-feature.schema.js";
 export * from "./runtime/execution-bus.js";
+export * from "./interview-feature.types.js";
+export * from "./interview-client-utils.js";
