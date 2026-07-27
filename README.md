@@ -220,14 +220,3 @@ If you see TS5103 for `ignoreDeprecations`, use:
 
 in tsconfig files for current TypeScript compatibility.
 
-### GitHub Contributions Not Showing
-
-If the heatmap is missing commits, verify that:
-
-1. `user.email` matches a verified email on your GitHub account
-2. commits are pushed to the default branch
-3. the repository is public, or private contributions are enabled
-
-## Commit Timeline
-
-The repository history has been organized into meaningful dated commits from April 9, 2026 onward.
